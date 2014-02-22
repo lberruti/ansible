@@ -121,7 +121,7 @@ class Task(object):
         self.su           = utils.boolean(ds.get('su', play.su))
         self.environment  = ds.get('environment', {})
         self.role_name    = role_name
-        self.no_log       = utils.boolean(ds.get('no_log', "false"))
+        self.no_log       = utils.boolean(ds.get('no_log', play.no_log))
 
         #Code to allow do until feature in a Task 
         if 'until' in ds:
