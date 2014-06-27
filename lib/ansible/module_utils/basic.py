@@ -43,6 +43,7 @@ BOOLEANS = BOOLEANS_TRUE + BOOLEANS_FALSE
 # of an ansible module. The source of this common code lives
 # in lib/ansible/module_common.py
 
+import locale
 import os
 import re
 import pipes
@@ -182,6 +183,7 @@ class AnsibleModule(object):
         self.supports_check_mode = supports_check_mode
         self.check_mode = False
         self.no_log = no_log
+        self.cleanup_files = []
         
         self.aliases = {}
         
@@ -189,6 +191,10 @@ class AnsibleModule(object):
             for k, v in FILE_COMMON_ARGUMENTS.iteritems():
                 if k not in self.argument_spec:
                     self.argument_spec[k] = v
+
+        # check the locale as set by the current environment, and
+        # reset to LANG=C if it's an invalid/unavailable locale
+        self._check_locale()
 
         (self.params, self.args) = self._load_params()
 
@@ -560,6 +566,24 @@ class AnsibleModule(object):
             kwargs['state'] = 'absent'
         return kwargs
 
+    def _check_locale(self):
+        '''
+        Uses the locale module to test the currently set locale
+        (per the LANG and LC_CTYPE environment settings)
+        '''
+        try:
+            # setting the locale to '' uses the default locale
+            # as it would be returned by locale.getdefaultlocale()
+            locale.setlocale(locale.LC_ALL, '')
+        except locale.Error, e:
+            # fallback to the 'C' locale, which may cause unicode
+            # issues but is preferable to simply failing because
+            # of an unknown locale
+            locale.setlocale(locale.LC_ALL, 'C')
+            os.environ['LANG']     = 'C'
+            os.environ['LC_CTYPE'] = 'C'
+        except Exception, e:
+            self.fail_json(msg="An unknown error was encountered while attempting to validate the locale: %s" % e)
 
     def _handle_aliases(self):
         aliases_results = {} #alias:canon
@@ -898,11 +922,20 @@ class AnsibleModule(object):
     def from_json(self, data):
         return json.loads(data)
 
+    def add_cleanup_file(self, path):
+        if path not in self.cleanup_files:
+            self.cleanup_files.append(path)
+
+    def do_cleanup_files(self):
+        for path in self.cleanup_files:
+            self.cleanup(path)
+
     def exit_json(self, **kwargs):
         ''' return from the module, without error '''
         self.add_path_info(kwargs)
         if not 'changed' in kwargs:
             kwargs['changed'] = False
+        self.do_cleanup_files()
         print self.jsonify(kwargs)
         sys.exit(0)
 
@@ -911,6 +944,7 @@ class AnsibleModule(object):
         self.add_path_info(kwargs)
         assert 'msg' in kwargs, "implementation error -- msg to explain the error is required"
         kwargs['failed'] = True
+        self.do_cleanup_files()
         print self.jsonify(kwargs)
         sys.exit(1)
 
@@ -958,7 +992,7 @@ class AnsibleModule(object):
             self.fail_json(msg='Could not make backup of %s to %s: %s' % (fn, backupdest, e))
         return backupdest
 
-    def cleanup(self,tmpfile):
+    def cleanup(self, tmpfile):
         if os.path.exists(tmpfile):
             try:
                 os.unlink(tmpfile)
@@ -988,6 +1022,18 @@ class AnsibleModule(object):
         creating = not os.path.exists(dest)
 
         try:
+            login_name = os.getlogin()
+        except OSError:
+            # not having a tty can cause the above to fail, so
+            # just get the LOGNAME environment variable instead
+            login_name = os.environ.get('LOGNAME', None)
+
+        # if the original login_name doesn't match the currently
+        # logged-in user, or if the SUDO_USER environment variable
+        # is set, then this user has switched their credentials
+        switched_user = login_name and login_name != pwd.getpwuid(os.getuid())[0] or os.environ.get('SUDO_USER')
+
+        try:
             # Optimistically try a rename, solves some corner cases and can avoid useless work, throws exception if not atomic.
             os.rename(src, dest)
         except (IOError,OSError), e:
@@ -1001,7 +1047,7 @@ class AnsibleModule(object):
                 prefix=".ansible_tmp", dir=dest_dir, suffix=dest_file)
 
             try: # leaves tmp file behind when sudo and  not root
-                if os.getenv("SUDO_USER") and os.getuid() != 0:
+                if switched_user and os.getuid() != 0:
                     # cleanup will happen by 'rm' of tempdir
                     # copy2 will preserve some metadata
                     shutil.copy2(src, tmp_dest.name)
@@ -1010,7 +1056,8 @@ class AnsibleModule(object):
                 if self.selinux_enabled():
                     self.set_context_if_different(
                         tmp_dest.name, context, False)
-                if dest_stat:
+                tmp_stat = os.stat(tmp_dest.name)
+                if dest_stat and (tmp_stat.st_uid != dest_stat.st_uid or tmp_stat.st_gid != dest_stat.st_gid):
                     os.chown(tmp_dest.name, dest_stat.st_uid, dest_stat.st_gid)
                 os.rename(tmp_dest.name, dest)
             except (shutil.Error, OSError, IOError), e:
@@ -1023,7 +1070,7 @@ class AnsibleModule(object):
             umask = os.umask(0)
             os.umask(umask)
             os.chmod(dest, 0666 ^ umask)
-            if os.getenv("SUDO_USER"):
+            if switched_user:
                 os.chown(dest, os.getuid(), os.getgid())
 
         if self.selinux_enabled():
