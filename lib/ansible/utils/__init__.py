@@ -25,10 +25,10 @@ import optparse
 import operator
 from ansible import errors
 from ansible import __version__
-from ansible.utils import template
 from ansible.utils.display_functions import *
 from ansible.utils.plugins import *
 from ansible.callbacks import display
+from ansible.utils.splitter import split_args, unquote
 import ansible.constants as C
 import ast
 import time
@@ -45,12 +45,15 @@ import getpass
 import sys
 import json
 
-#import vault
 from vault import VaultLib
 
 VERBOSITY=0
 
 MAX_FILE_SIZE_FOR_DIFF=1*1024*1024
+
+# caching the compilation of the regex used
+# to check for lookup calls within data
+LOOKUP_REGEX=re.compile(r'lookup\s*\(')
 
 try:
     import json
@@ -68,6 +71,11 @@ try:
     PASSLIB_AVAILABLE = True
 except:
     pass
+
+try:
+    import builtin
+except ImportError:
+    import __builtin__ as builtin
 
 KEYCZAR_AVAILABLE=False
 try:
@@ -194,6 +202,7 @@ def is_changed(result):
     return (result.get('changed', False) in [ True, 'True', 'true'])
 
 def check_conditional(conditional, basedir, inject, fail_on_undefined=False):
+    from ansible.utils import template
 
     if conditional is None or conditional == '':
         return True
@@ -288,6 +297,9 @@ def path_dwim_relative(original, dirname, source, playbook_base, check=True):
     ''' find one file in a directory one level up in a dir named dirname relative to current '''
     # (used by roles code)
 
+    from ansible.utils import template
+
+
     basedir = os.path.dirname(original)
     if os.path.islink(basedir):
         basedir = unfrackpath(basedir)
@@ -309,7 +321,44 @@ def json_loads(data):
 
     return json.loads(data)
 
-def parse_json(raw_data):
+def _clean_data(orig_data, from_remote=False, from_inventory=False):
+    ''' remove template tags from a string '''
+    data = orig_data
+    if isinstance(orig_data, basestring):
+        sub_list = [('{%','{#'), ('%}','#}')]
+        if from_remote or (from_inventory and '{{' in data and LOOKUP_REGEX.search(data)):
+            # if from a remote, we completely disable any jinja2 blocks
+            sub_list.extend([('{{','{#'), ('}}','#}')])
+        for pattern,replacement in sub_list:
+            data = data.replace(pattern, replacement)
+    return data
+
+def _clean_data_struct(orig_data, from_remote=False, from_inventory=False):
+    '''
+    walk a complex data structure, and use _clean_data() to
+    remove any template tags that may exist
+    '''
+    if not from_remote and not from_inventory:
+        raise errors.AnsibleErrors("when cleaning data, you must specify either from_remote or from_inventory")
+    if isinstance(orig_data, dict):
+        data = orig_data.copy()
+        for key in data:
+            new_key = _clean_data_struct(key, from_remote, from_inventory)
+            new_val = _clean_data_struct(data[key], from_remote, from_inventory)
+            if key != new_key:
+                del data[key]
+            data[new_key] = new_val
+    elif isinstance(orig_data, list):
+        data = orig_data[:]
+        for i in range(0, len(data)):
+            data[i] = _clean_data_struct(data[i], from_remote, from_inventory)
+    elif isinstance(orig_data, basestring):
+        data = _clean_data(orig_data, from_remote, from_inventory)
+    else:
+        data = orig_data
+    return data
+
+def parse_json(raw_data, from_remote=False, from_inventory=False):
     ''' this version for module return data only '''
 
     orig_data = raw_data
@@ -318,7 +367,7 @@ def parse_json(raw_data):
     data = filter_leading_non_json_lines(raw_data)
 
     try:
-        return json.loads(data)
+        results = json.loads(data)
     except:
         # not JSON, but try "Baby JSON" which allows many of our modules to not
         # require JSON and makes writing modules in bash much simpler
@@ -328,7 +377,6 @@ def parse_json(raw_data):
         except:
             print "failed to parse json: "+ data
             raise
-
         for t in tokens:
             if "=" not in t:
                 raise errors.AnsibleError("failed to parse: %s" % orig_data)
@@ -343,29 +391,32 @@ def parse_json(raw_data):
             results[key] = value
         if len(results.keys()) == 0:
             return { "failed" : True, "parsed" : False, "msg" : orig_data }
-        return results
 
-def smush_braces(data):
-    ''' smush Jinaj2 braces so unresolved templates like {{ foo }} don't get parsed weird by key=value code '''
-    while '{{ ' in data:
-        data = data.replace('{{ ', '{{')
-    while ' }}' in data:
-        data = data.replace(' }}', '}}')
-    return data
+    if from_remote:
+        results = _clean_data_struct(results, from_remote, from_inventory)
 
-def smush_ds(data):
-    # things like key={{ foo }} are not handled by shlex.split well, so preprocess any YAML we load
-    # so we do not have to call smush elsewhere
-    if type(data) == list:
-        return [ smush_ds(x) for x in data ]
-    elif type(data) == dict:
-        for (k,v) in data.items():
-            data[k] = smush_ds(v)
-        return data
-    elif isinstance(data, basestring):
-        return smush_braces(data)
-    else:
-        return data
+    return results
+
+def merge_module_args(current_args, new_args):
+    '''
+    merges either a dictionary or string of k=v pairs with another string of k=v pairs,
+    and returns a new k=v string without duplicates.
+    '''
+    if not isinstance(current_args, basestring):
+        raise errors.AnsibleError("expected current_args to be a basestring")
+    # we use parse_kv to split up the current args into a dictionary
+    final_args = parse_kv(current_args)
+    if isinstance(new_args, dict):
+        final_args.update(new_args)
+    elif isinstance(new_args, basestring):
+        new_args_kv = parse_kv(new_args)
+        final_args.update(new_args_kv)
+    # then we re-assemble into a string
+    module_args = ""
+    for (k,v) in final_args.iteritems():
+        if isinstance(v, basestring):
+            module_args = "%s=%s %s" % (k, pipes.quote(v), module_args)
+    return module_args.strip()
 
 def parse_yaml(data, path_hint=None):
     ''' convert a yaml string to a data structure.  Also supports JSON, ssssssh!!!'''
@@ -385,7 +436,7 @@ def parse_yaml(data, path_hint=None):
         # else this is pretty sure to be a YAML document
         loaded = yaml.safe_load(data)
 
-    return smush_ds(loaded)
+    return loaded
 
 def process_common_errors(msg, probline, column):
     replaced = probline.replace(" ","")
@@ -567,7 +618,7 @@ def parse_kv(args):
         # attempting to split a unicode here does bad things
         args = args.encode('utf-8')
         try:
-            vargs = shlex.split(args, posix=True)
+            vargs = split_args(args)
         except ValueError, ve:
             if 'no closing quotation' in str(ve).lower():
                 raise errors.AnsibleError("error parsing argument string, try quoting the entire line.")
@@ -577,7 +628,7 @@ def parse_kv(args):
         for x in vargs:
             if "=" in x:
                 k, v = x.split("=",1)
-                options[k]=v
+                options[k] = unquote(v)
     return options
 
 def merge_hash(a, b):
@@ -1024,11 +1075,14 @@ def list_intersection(a, b):
 
 def safe_eval(expr, locals={}, include_exceptions=False):
     '''
-    this is intended for allowing things like:
+    This is intended for allowing things like:
     with_items: a_list_variable
-    where Jinja2 would return a string
-    but we do not want to allow it to call functions (outside of Jinja2, where
-    the env is constrained)
+
+    Where Jinja2 would return a string but we do not want to allow it to
+    call functions (outside of Jinja2, where the env is constrained). If
+    the input data to this function came from an untrusted (remote) source,
+    it should first be run through _clean_data_struct() to ensure the data
+    is further sanitized prior to evaluation.
 
     Based on:
     http://stackoverflow.com/questions/12523516/using-ast-and-whitelists-to-make-pythons-eval-safe
@@ -1041,7 +1095,6 @@ def safe_eval(expr, locals={}, include_exceptions=False):
     SAFE_NODES = set(
         (
             ast.Add,
-            ast.Attribute,
             ast.BinOp,
             ast.Call,
             ast.Compare,
@@ -1068,34 +1121,24 @@ def safe_eval(expr, locals={}, include_exceptions=False):
             )
         )
 
-    # builtin functions that are safe to call
-    BUILTIN_WHITELIST = [
-        'abs', 'all', 'any', 'basestring', 'bin', 'bool', 'buffer', 'bytearray',
-        'bytes', 'callable', 'chr', 'cmp', 'coerce', 'complex', 'copyright', 'credits',
-        'dict', 'dir', 'divmod', 'enumerate', 'exit', 'float', 'format', 'frozenset',
-        'getattr', 'globals', 'hasattr', 'hash', 'hex', 'id', 'int', 'intern',
-        'isinstance', 'issubclass', 'iter', 'len', 'license', 'list', 'locals', 'long',
-        'map', 'max', 'memoryview', 'min', 'next', 'oct', 'ord', 'pow', 'print',
-        'property', 'quit', 'range', 'reversed', 'round', 'set', 'slice', 'sorted',
-        'str', 'sum', 'tuple', 'unichr', 'unicode', 'vars', 'xrange', 'zip',
-    ]
-
     filter_list = []
     for filter in filter_loader.all():
         filter_list.extend(filter.filters().keys())
 
-    CALL_WHITELIST = BUILTIN_WHITELIST + filter_list + C.DEFAULT_CALLABLE_WHITELIST
+    CALL_WHITELIST = C.DEFAULT_CALLABLE_WHITELIST + filter_list
 
     class CleansingNodeVisitor(ast.NodeVisitor):
-        def generic_visit(self, node):
+        def generic_visit(self, node, inside_call=False):
             if type(node) not in SAFE_NODES:
                 raise Exception("invalid expression (%s)" % expr)
             elif isinstance(node, ast.Call):
-                if not isinstance(node.func, ast.Attribute) and node.func.id not in CALL_WHITELIST:
-                    raise Exception("invalid function: %s" % node.func.id)
+                inside_call = True
+            elif isinstance(node, ast.Name) and inside_call:
+                if hasattr(builtin, node.id) and node.id not in CALL_WHITELIST:
+                    raise Exception("invalid function: %s" % node.id)
             # iterate over all child nodes
             for child_node in ast.iter_child_nodes(node):
-                super(CleansingNodeVisitor, self).visit(child_node)
+                self.generic_visit(child_node, inside_call)
 
     if not isinstance(expr, basestring):
         # already templated to a datastructure, perhaps?
@@ -1103,9 +1146,9 @@ def safe_eval(expr, locals={}, include_exceptions=False):
             return (expr, None)
         return expr
 
+    cnv = CleansingNodeVisitor()
     try:
         parsed_tree = ast.parse(expr, mode='eval')
-        cnv = CleansingNodeVisitor()
         cnv.visit(parsed_tree)
         compiled = compile(parsed_tree, expr, 'eval')
         result = eval(compiled, {}, locals)
@@ -1127,6 +1170,8 @@ def safe_eval(expr, locals={}, include_exceptions=False):
 
 
 def listify_lookup_plugin_terms(terms, basedir, inject):
+
+    from ansible.utils import template
 
     if isinstance(terms, basestring):
         # someone did:
