@@ -574,6 +574,7 @@ class PlayBook(object):
             diff=self.diff,
             accelerate=play.accelerate,
             accelerate_port=play.accelerate_port,
+            no_log=play.no_log
         ).run()
         self.stats.compute(setup_results, setup=True)
 
