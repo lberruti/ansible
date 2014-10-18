@@ -245,7 +245,7 @@ class ActionModule(object):
                 )
 
                 if self.runner.no_log:
-                    new_module_args['NO_LOG'] = True
+                    new_module_args['NO_LOG'] = 'True'
 
                 module_args_tmp = utils.merge_module_args(module_args, new_module_args)
 
@@ -271,9 +271,9 @@ class ActionModule(object):
                     original_basename=source_rel
                 )
                 if self.runner.noop_on_check(inject):
-                    new_module_args['CHECKMODE'] = True
+                    new_module_args['CHECKMODE'] = 'True'
                 if self.runner.no_log:
-                    new_module_args['NO_LOG'] = True
+                    new_module_args['NO_LOG'] = 'True'
 
                 module_args_tmp = utils.merge_module_args(module_args, new_module_args)
 
