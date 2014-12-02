@@ -76,6 +76,7 @@ class PlayBook(object):
         any_errors_fatal = False,
         vault_password   = False,
         force_handlers   = False,
+        no_log           = C.DEFAULT_NO_LOG,
         # privelege escalation
         become           = C.DEFAULT_BECOME,
         become_method    = C.DEFAULT_BECOME_METHOD,
@@ -144,6 +145,7 @@ class PlayBook(object):
         self.any_errors_fatal = any_errors_fatal
         self.vault_password   = vault_password
         self.force_handlers   = force_handlers
+        self.no_log           = no_log
 
         self.become           = become
         self.become_method    = become_method
@@ -550,7 +552,12 @@ class PlayBook(object):
             for host, results in results.get('contacted',{}).iteritems():
                 if results.get('changed', False):
                     for handler_name in task.notify:
-                        self._flag_handler(play, template(play.basedir, handler_name, task.module_vars), host)
+                        handler_name = template(play.basedir, handler_name, task.module_vars)
+                        if not isinstance(handler_name, basestring):
+                            for item in handler_name:
+                                self._flag_handler(play, item, host)
+                        else:
+                            self._flag_handler(play, handler_name, host)
 
         ansible.callbacks.set_task(self.callbacks, None)
         ansible.callbacks.set_task(self.runner_callbacks, None)
@@ -627,6 +634,7 @@ class PlayBook(object):
             diff=self.diff,
             accelerate=play.accelerate,
             accelerate_port=play.accelerate_port,
+            no_log=play.no_log
         ).run()
         self.stats.compute(setup_results, setup=True)
 
