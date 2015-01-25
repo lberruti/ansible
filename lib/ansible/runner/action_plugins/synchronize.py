@@ -202,6 +202,8 @@ class ActionModule(object):
         module_args = ""
         if self.runner.noop_on_check(inject):
             module_args = "CHECKMODE=True"
+        if self.runner.no_log:
+            module_args += " NO_LOG=True"
 
         # run the module and store the result
         result = self.runner._execute_module(conn, tmp, 'synchronize', module_args, complex_args=options, inject=inject)

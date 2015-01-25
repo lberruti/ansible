@@ -111,6 +111,8 @@ class ActionModule(object):
             # make sure checkmod is passed on correctly
             if self.runner.noop_on_check(inject):
                 new_module_args['CHECKMODE'] = True
+            if self.runner.no_log:
+                new_module_args['NO_LOG'] = True
 
             module_args = utils.merge_module_args(module_args, new_module_args)
         else:
@@ -118,4 +120,6 @@ class ActionModule(object):
             # make sure checkmod is passed on correctly
             if self.runner.noop_on_check(inject):
                 module_args += " CHECKMODE=True"
+            if self.runner.no_log:
+                module_args += " NO_LOG=True"
         return self.runner._execute_module(conn, tmp, 'unarchive', module_args, inject=inject, complex_args=complex_args)

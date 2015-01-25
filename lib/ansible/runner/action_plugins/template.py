@@ -169,6 +169,8 @@ class ActionModule(object):
             # rely on the file module to report its changed status
             if self.runner.noop_on_check(inject):
                 new_module_args['CHECKMODE'] = True
+            if self.runner.no_log:
+                new_module_args['NO_LOG'] = True
             options.update(new_module_args)
             return self.runner._execute_module(conn, tmp, 'file', module_args, inject=inject, complex_args=options)
 
