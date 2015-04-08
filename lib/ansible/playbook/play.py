@@ -153,7 +153,7 @@ class Play(object):
         self.accelerate_port  = ds.get('accelerate_port', None)
         self.accelerate_ipv6  = ds.get('accelerate_ipv6', False)
         self.max_fail_pct     = int(ds.get('max_fail_percentage', 100))
-        self.no_log           = utils.boolean(ds.get('no_log', 'false'))
+        self.no_log           = utils.boolean(ds.get('no_log', self.playbook.no_log))
         self.force_handlers   = utils.boolean(ds.get('force_handlers', self.playbook.force_handlers))
 
         # Fail out if user specifies conflicting privelege escalations
