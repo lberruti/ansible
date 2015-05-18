@@ -32,6 +32,8 @@ class ActionModule(object):
         if module_name == 'shell':
             module_name = 'command'
             module_args += " #USE_SHELL"
+        if self.runner.no_syslog:
+            module_args += " NO_SYSLOG=True"
 
         if "tmp" not in tmp:
             tmp = self.runner._make_tmp_path(conn)

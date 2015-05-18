@@ -151,6 +151,7 @@ class Runner(object):
         vault_pass=None,
         run_hosts=None,                     # an optional list of pre-calculated hosts to run on
         no_log=False,                       # option to enable/disable logging for a given task
+        no_syslog=False,                    # option to enable/disable syslogging
         run_once=False,                     # option to enable/disable host bypass loop for a given task
         become=False,                         # whether to run privelege escalation or not
         become_method=C.DEFAULT_BECOME_METHOD,
@@ -216,6 +217,7 @@ class Runner(object):
         self.omit_token       = '__omit_place_holder__%s' % sha1(os.urandom(64)).hexdigest()
         self.vault_pass       = vault_pass
         self.no_log           = no_log
+        self.no_syslog        = no_syslog
         self.run_once         = run_once
 
         if self.transport == 'smart':
@@ -452,6 +454,9 @@ class Runner(object):
         async_jid=None, async_module=None, async_limit=None, inject=None, persist_files=False, complex_args=None, delete_remote_tmp=True):
 
         ''' transfer and run a module along with its arguments on the remote side'''
+
+        if self.no_syslog:
+            args = "%s NO_SYSLOG=True" % (args)
 
         # hack to support fireball mode
         if module_name == 'fireball':

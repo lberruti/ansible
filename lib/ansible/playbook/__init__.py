@@ -76,7 +76,8 @@ class PlayBook(object):
         any_errors_fatal = False,
         vault_password   = False,
         force_handlers   = False,
-        # privelege escalation
+        no_syslog        = C.DEFAULT_NO_SYSLOG,
+        # privilege escalation
         become           = C.DEFAULT_BECOME,
         become_method    = C.DEFAULT_BECOME_METHOD,
         become_user      = C.DEFAULT_BECOME_USER,
@@ -144,6 +145,7 @@ class PlayBook(object):
         self.any_errors_fatal = any_errors_fatal
         self.vault_password   = vault_password
         self.force_handlers   = force_handlers
+        self.no_syslog        = no_syslog
 
         self.become           = become
         self.become_method    = become_method
@@ -430,6 +432,7 @@ class PlayBook(object):
             become_method=task.become_method,
             become_user=task.become_user,
             become_pass=task.become_pass,
+            no_syslog=self.no_syslog,
         )
 
         runner.module_vars.update({'play_hosts': hosts})
@@ -627,6 +630,7 @@ class PlayBook(object):
             diff=self.diff,
             accelerate=play.accelerate,
             accelerate_port=play.accelerate_port,
+            no_syslog=self.no_syslog,
         ).run()
         self.stats.compute(setup_results, setup=True)
 
