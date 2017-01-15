@@ -34,8 +34,8 @@ import pwd
 
 from ansible.module_utils.basic import get_all_subclasses
 from ansible.module_utils.six import PY3, iteritems
-from ansible.module_utils.six.moves import configparser, StringIO
-from ansible.module_utils._text import to_native
+from ansible.module_utils.six.moves import configparser, StringIO, reduce
+from ansible.module_utils._text import to_native, to_text
 
 try:
     import selinux
@@ -328,11 +328,15 @@ class Facts(object):
         else:
             proc_1 = os.path.basename(proc_1)
 
+        # The ps command above may return "COMMAND" if the user cannot read /proc, e.g. with grsecurity
+        if proc_1 == "COMMAND\n":
+            proc_1 = None
+
         if proc_1 is not None:
             proc_1 = to_native(proc_1)
             proc_1 = proc_1.strip()
 
-        if proc_1 == 'init' or proc_1.endswith('sh'):
+        if proc_1 is not None and (proc_1 == 'init' or proc_1.endswith('sh')):
             # many systems return init, so this cannot be trusted, if it ends in 'sh' it probalby is a shell in a container
             proc_1 = None
 

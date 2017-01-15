@@ -30,9 +30,8 @@ import tempfile
 import time
 from abc import ABCMeta, abstractmethod
 
-from ansible.compat.six import binary_type, text_type, iteritems, with_metaclass
-
 from ansible import constants as C
+from ansible.compat.six import binary_type, string_types, text_type, iteritems, with_metaclass
 from ansible.errors import AnsibleError, AnsibleConnectionFailure
 from ansible.executor.module_common import modify_module
 from ansible.module_utils._text import to_bytes, to_native, to_text
@@ -40,6 +39,7 @@ from ansible.module_utils.json_utils import _filter_non_json_lines
 from ansible.parsing.utils.jsonify import jsonify
 from ansible.playbook.play_context import MAGIC_VARIABLE_MAPPING
 from ansible.release import __version__
+from ansible.vars.unsafe_proxy import wrap_var
 
 
 try:
@@ -359,14 +359,16 @@ class ActionBase(with_metaclass(ABCMeta, object)):
             # Try to use file system acls to make the files readable for sudo'd
             # user
             if execute:
-                mode = 'r-x'
+                chmod_mode = 'rx'
+                setfacl_mode = 'r-x'
             else:
+                chmod_mode = 'rX'
                 ### Note: this form fails silently on freebsd.  We currently
                 # never call _fixup_perms2() with execute=False but if we
                 # start to we'll have to fix this.
-                mode = 'r-X'
+                setfacl_mode = 'r-X'
 
-            res = self._remote_set_user_facl(remote_paths, self._play_context.become_user, mode)
+            res = self._remote_set_user_facl(remote_paths, self._play_context.become_user, setfacl_mode)
             if res['rc'] != 0:
                 # File system acls failed; let's try to use chown next
                 # Set executable bit first as on some systems an
@@ -374,7 +376,7 @@ class ActionBase(with_metaclass(ABCMeta, object)):
                 if execute:
                     res = self._remote_chmod(remote_paths, 'u+x')
                     if res['rc'] != 0:
-                        raise AnsibleError('Failed to set file mode on remote temporary files (rc: {0}, err: {1})'.format(res['rc'], res['stderr']))
+                        raise AnsibleError('Failed to set file mode on remote temporary files (rc: {0}, err: {1})'.format(res['rc'], to_native(res['stderr'])))
 
                 res = self._remote_chown(remote_paths, self._play_context.become_user)
                 if res['rc'] != 0 and remote_user == 'root':
@@ -388,20 +390,20 @@ class ActionBase(with_metaclass(ABCMeta, object)):
                         display.warning('Using world-readable permissions for temporary files Ansible needs to create when becoming an unprivileged user.'
                                 ' This may be insecure. For information on securing this, see'
                                 ' https://docs.ansible.com/ansible/become.html#becoming-an-unprivileged-user')
-                        res = self._remote_chmod(remote_paths, 'a+%s' % mode)
+                        res = self._remote_chmod(remote_paths, 'a+%s' % chmod_mode)
                         if res['rc'] != 0:
-                            raise AnsibleError('Failed to set file mode on remote files (rc: {0}, err: {1})'.format(res['rc'], res['stderr']))
+                            raise AnsibleError('Failed to set file mode on remote files (rc: {0}, err: {1})'.format(res['rc'], to_native(res['stderr'])))
                     else:
                         raise AnsibleError('Failed to set permissions on the temporary files Ansible needs to create when becoming an unprivileged user'
                                 ' (rc: {0}, err: {1}). For information on working around this,'
-                                ' see https://docs.ansible.com/ansible/become.html#becoming-an-unprivileged-user'.format(res['rc'], res['stderr']))
+                                ' see https://docs.ansible.com/ansible/become.html#becoming-an-unprivileged-user'.format(res['rc'], to_native(res['stderr'])))
         elif execute:
             # Can't depend on the file being transferred with execute
             # permissions.  Only need user perms because no become was
             # used here
             res = self._remote_chmod(remote_paths, 'u+x')
             if res['rc'] != 0:
-                raise AnsibleError('Failed to set file mode on remote files (rc: {0}, err: {1})'.format(res['rc'], res['stderr']))
+                raise AnsibleError('Failed to set file mode on remote files (rc: {0}, err: {1})'.format(res['rc'], to_native(res['stderr'])))
 
         return remote_paths
 
@@ -452,6 +454,8 @@ class ActionBase(with_metaclass(ABCMeta, object)):
         # happens sometimes when it is a dir and not on bsd
         if 'checksum' not in mystat['stat']:
             mystat['stat']['checksum'] = ''
+        elif not isinstance(mystat['stat']['checksum'], string_types):
+            raise AnsibleError("Invalid checksum returned by stat: expected a string type but got %s" % type(mystat['stat']['checksum']))
 
         return mystat['stat']
 
@@ -667,6 +671,39 @@ class ActionBase(with_metaclass(ABCMeta, object)):
         display.debug("done with _execute_module (%s, %s)" % (module_name, module_args))
         return data
 
+    def _clean_returned_data(self, data):
+        remove_keys = set()
+        fact_keys = set(data.keys())
+        # first we add all of our magic variable names to the set of
+        # keys we want to remove from facts
+        for magic_var in MAGIC_VARIABLE_MAPPING:
+            remove_keys.update(fact_keys.intersection(MAGIC_VARIABLE_MAPPING[magic_var]))
+        # next we remove any connection plugin specific vars
+        for conn_path in self._shared_loader_obj.connection_loader.all(path_only=True):
+            try:
+                conn_name = os.path.splitext(os.path.basename(conn_path))[0]
+                re_key = re.compile('^ansible_%s_' % conn_name)
+                for fact_key in fact_keys:
+                    if re_key.match(fact_key):
+                        remove_keys.add(fact_key)
+            except AttributeError:
+                pass
+
+        # remove some KNOWN keys
+        for hard in ['ansible_rsync_path', 'ansible_playbook_python']:
+            if hard in fact_keys:
+                remove_keys.add(hard)
+
+        # finally, we search for interpreter keys to remove
+        re_interp = re.compile('^ansible_.*_interpreter$')
+        for fact_key in fact_keys:
+            if re_interp.match(fact_key):
+                remove_keys.add(fact_key)
+        # then we remove them (except for ssh host keys)
+        for r_key in remove_keys:
+            if not r_key.startswith('ansible_ssh_host_key_'):
+                del data[r_key]
+
     def _parse_returned_data(self, res):
         try:
             filtered_output, warnings = _filter_non_json_lines(res.get('stdout', u''))
@@ -675,37 +712,11 @@ class ActionBase(with_metaclass(ABCMeta, object)):
             data = json.loads(filtered_output)
             data['_ansible_parsed'] = True
             if 'ansible_facts' in data and isinstance(data['ansible_facts'], dict):
-                remove_keys = set()
-                fact_keys = set(data['ansible_facts'].keys())
-                # first we add all of our magic variable names to the set of
-                # keys we want to remove from facts
-                for magic_var in MAGIC_VARIABLE_MAPPING:
-                    remove_keys.update(fact_keys.intersection(MAGIC_VARIABLE_MAPPING[magic_var]))
-                # next we remove any connection plugin specific vars
-                for conn_path in self._shared_loader_obj.connection_loader.all(path_only=True):
-                    try:
-                        conn_name = os.path.splitext(os.path.basename(conn_path))[0]
-                        re_key = re.compile('^ansible_%s_' % conn_name)
-                        for fact_key in fact_keys:
-                            if re_key.match(fact_key):
-                                remove_keys.add(fact_key)
-                    except AttributeError:
-                        pass
-
-                # remove some KNOWN keys
-                for hard in ['ansible_rsync_path']:
-                    if hard in fact_keys:
-                        remove_keys.add(hard)
-
-                # finally, we search for interpreter keys to remove
-                re_interp = re.compile('^ansible_.*_interpreter$')
-                for fact_key in fact_keys:
-                    if re_interp.match(fact_key):
-                        remove_keys.add(fact_key)
-                # then we remove them (except for ssh host keys)
-                for r_key in remove_keys:
-                    if not r_key.startswith('ansible_ssh_host_key_'):
-                        del data['ansible_facts'][r_key]
+                self._clean_returned_data(data['ansible_facts'])
+                data['ansible_facts'] = wrap_var(data['ansible_facts'])
+            if 'add_host' in data and isinstance(data['add_host'].get('host_vars', None), dict):
+                self._clean_returned_data(data['add_host']['host_vars'])
+                data['add_host'] = wrap_var(data['add_host'])
         except ValueError:
             # not valid json, lets try to capture error
             data = dict(failed=True, _ansible_parsed=False)
