@@ -24,15 +24,15 @@ from ansible.module_utils._text import to_text
 
 PY3 = sys.version_info[0] == 3
 
-syslog.openlog('ansible-%s' % os.path.basename(__file__))
-syslog.syslog(syslog.LOG_NOTICE, 'Invoked with %s' % " ".join(sys.argv[1:]))
+do_notice = True
 
 # pipe for communication between forked process and parent
 ipc_watcher, ipc_notifier = multiprocessing.Pipe()
 
 
 def notice(msg):
-    syslog.syslog(syslog.LOG_NOTICE, msg)
+    if do_notice:
+        syslog.syslog(syslog.LOG_NOTICE, msg)
 
 
 def daemonize_self():
@@ -222,11 +222,18 @@ if __name__ == '__main__':
     # consider underscore as no argsfile so we can support passing of additional positional parameters
     if argsfile != '_':
         cmd = "%s %s" % (wrapped_module, argsfile)
+        if '_ansible_no_log' in open(argsfile).read():
+            do_notice = False
     else:
         cmd = wrapped_module
+        if '_ansible_no_log' in open(cmd).read():
+            do_notice = False
     step = 5
 
     async_dir = os.environ.get('ANSIBLE_ASYNC_DIR', '~/.ansible_async')
+    if do_notice:
+        syslog.openlog('ansible-%s' % os.path.basename(__file__))
+    notice('Invoked with %s' % " ".join(sys.argv[1:]))
 
     # setup job output directory
     jobdir = os.path.expanduser(async_dir)
