@@ -19,6 +19,7 @@
 from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
+import os
 import threading
 import time
 
@@ -486,25 +487,19 @@ class StrategyBase:
 
                     if 'ansible_facts' in result_item:
 
+                        # if delegated fact and we are delegating facts, we need to change target host for them
+                        if original_task.delegate_to is not None and original_task.delegate_facts:
+                            host_list = self.get_delegated_hosts(result_item, original_task)
+                        else:
+                            host_list = self.get_task_hosts(iterator, original_host, original_task)
+
                         if original_task.action == 'include_vars':
-
-                            if original_task.delegate_to is not None:
-                                host_list = self.get_delegated_hosts(result_item, original_task)
-                            else:
-                                host_list = self.get_task_hosts(iterator, original_host, original_task)
-
                             for (var_name, var_value) in iteritems(result_item['ansible_facts']):
                                 # find the host we're actually referring too here, which may
                                 # be a host that is not really in inventory at all
                                 for target_host in host_list:
                                     self._variable_manager.set_host_variable(target_host, var_name, var_value)
                         else:
-                            # if delegated fact and we are delegating facts, we need to change target host for them
-                            if original_task.delegate_to is not None and original_task.delegate_facts:
-                                host_list = self.get_delegated_hosts(result_item, original_task)
-                            else:
-                                host_list = self.get_task_hosts(iterator, original_host, original_task)
-
                             for target_host in host_list:
                                 if original_task.action == 'set_fact':
                                     self._variable_manager.set_nonpersistent_facts(target_host, result_item['ansible_facts'].copy())
@@ -904,9 +899,12 @@ class StrategyBase:
                         iterator._host_states[host.name].run_state = iterator.ITERATING_COMPLETE
                 msg="ending play"
         elif meta_action == 'reset_connection':
-            connection = connection_loader.get(play_context.connection, play_context, '/dev/null')
-            connection.reset()
-            msg= 'reset connection'
+            connection = connection_loader.get(play_context.connection, play_context, os.devnull)
+            if connection:
+                connection.reset()
+                msg= 'reset connection'
+            else:
+                msg= 'no connection, nothing to reset'
         else:
             raise AnsibleError("invalid meta action requested: %s" % meta_action, obj=task._ds)
 
