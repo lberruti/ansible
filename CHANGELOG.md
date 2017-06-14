@@ -1,14 +1,49 @@
 Ansible Changes By Release
 ==========================
 
-## 2.3.1 "Ramble On" - TBD
+## 2.3.2 "Ramble On" - TBD
+
+### Bugfixes
+* Fix partend i18n issues
+* fixed handling of extra vars for tower_job_template (#25272)
+* Python3 bugfixes
+  * Fix sorting of ec2 policies
+  * Fix digital_ocean dynamic inventory script
+  * Fix for the docker connection plugin
+  * Fix pip module when using python3's pyvenv and python3 -m venv to create virtualenvs
+* Fix for the AnsiBallZ wrapper so that it gives a better error message when
+  there's not enough disk space to create its tempdir.
+* Fix so ansilbe-galaxy install --force with unversioned roles will once again
+  overwrite old versions.
+* Fix for RabbitMQ 3.6.7 endpoint return code changing.
+* Fix for Foreman organization creation
+* fixed incorrect fail_json ref in rpm_key
+* Corrected requried on hash_name for dynamodb_table
+* Fix for fetch action plugin not validating correctly
+
+## 2.3.1 "Ramble On" - 2017-06-01
 
 
 ### Bugfixes
+* Security fix for CVE-2017-7481 - data for lookup plugins used as variables was not being correctly marked as "unsafe".
 * Fix default value of fetch module's validate_checksum to be True
 * Added fix for "meta: refresh_connection" not working with default 'smart' connection.
 * Fix template so that the --diff command line option works when the destination is a directory
 * Fix python3 bugs in pam_limits
+* Fix unbound error when using module deprecation as a single string
+* Several places in which error handling was broken due to bad conversions or just typos
+* Fix to user module for appending/setting groups on OpenBSD (flags were reversed)
+* assemble fix to use safer os.join.path, avoids charset issues
+* fixed issue with solaris facts and i18n
+* added python2.4 compatiblity fix to sysctl module
+* Fix comparison of exisiting container security opts in the docker_container module
+* fixed service module invocation of insserv on certain platforms
+* Fix traceback in os_user in an error case.
+* Fix docker container to restart a container when changing to fewer exposed ports
+* Fix tracebacks in docker_network
+* Fixes to detection of updated docker images
+* Handle detection of docker image changes when published ports is changed
+* Fix for docker_container restarting images when links list is empty.
 
 ## 2.3 "Ramble On" - 2017-04-12
 
@@ -41,6 +76,7 @@ Ansible Changes By Release
 * 'service' tasks can now use async again, we had lost this capability when changed into an action plugin.
 * made any_errors_fatal inheritable from play to task and all other objects in between.
 * many small performance improvements in inventory and variable handling and in task execution.
+* Added a retry class to the ec2_asg module since customers were running into throttling errors (AWSRetry is a solution for modules using boto3 which isn't applicable here).
 
 ### Deprecations
 * Specifying --tags (or --skip-tags) multiple times on the command line

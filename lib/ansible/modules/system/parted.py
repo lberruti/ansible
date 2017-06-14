@@ -20,7 +20,7 @@
 
 ANSIBLE_METADATA = {'metadata_version': '1.0',
                     'status': ['preview'],
-                    'supported_by': 'curated'}
+                    'supported_by': 'community'}
 
 
 DOCUMENTATION = '''
@@ -585,6 +585,7 @@ def main():
         },
         supports_check_mode=True,
     )
+    module.run_command_environ_update = {'LANG': 'C', 'LC_ALL': 'C', 'LC_MESSAGES': 'C'}
 
     # Data extraction
     device      = module.params['device']
