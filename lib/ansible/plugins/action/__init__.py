@@ -177,10 +177,9 @@ class ActionBase(with_metaclass(ABCMeta, object)):
             if not isinstance(environments, list):
                 environments = [environments]
 
-            # the environments as inherited need to be reversed, to make
-            # sure we merge in the parent's values first so those in the
-            # block then task 'win' in precedence
-            environments.reverse()
+            # The order of environments matters to make sure we merge
+            # in the parent's values first so those in the block then
+            # task 'win' in precedence
             for environment in environments:
                 if environment is None or len(environment) == 0:
                     continue
@@ -606,6 +605,9 @@ class ActionBase(with_metaclass(ABCMeta, object)):
 
         # give the module the socket for persistent connections
         module_args['_ansible_socket'] = task_vars.get('ansible_socket')
+
+        # make sure all commands use the designated shell executable
+        module_args['_ansible_shell_executable'] = self._play_context.executable
 
     def _execute_module(self, module_name=None, module_args=None, tmp=None, task_vars=None, persist_files=False, delete_remote_tmp=True, wrap_async=False):
         '''

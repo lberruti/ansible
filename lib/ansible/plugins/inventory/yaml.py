@@ -88,7 +88,11 @@ class InventoryModule(BaseFileInventoryPlugin):
             raise AnsibleParserError(e)
 
         if not data:
-            return False
+            raise AnsibleParserError('Parsed empty YAML file')
+        elif not isinstance(data, MutableMapping):
+            raise AnsibleParserError('YAML inventory has invalid structure, it should be a dictionary, got: %s' % type(data))
+        elif data.get('plugin'):
+            raise AnsibleParserError('Plugin configuration YAML file, not YAML inventory')
 
         # We expect top level keys to correspond to groups, iterate over them
         # to get host, vars and subgroups (which we iterate over recursivelly)
@@ -114,19 +118,22 @@ class InventoryModule(BaseFileInventoryPlugin):
                         raise AnsibleParserError('Invalid %s entry for %s group, requires a dictionary, found %s instead.' %
                                                  (section, group, type(group_data[section])))
 
-            if group_data.get('vars', False):
-                for var in group_data['vars']:
-                    self.inventory.set_variable(group, var, group_data['vars'][var])
+            for key in group_data:
+                if key == 'vars':
+                    for var in group_data['vars']:
+                        self.inventory.set_variable(group, var, group_data['vars'][var])
 
-            if group_data.get('children', False):
-                for subgroup in group_data['children']:
-                    self._parse_group(subgroup, group_data['children'][subgroup])
-                    self.inventory.add_child(group, subgroup)
+                elif key == 'children':
+                    for subgroup in group_data['children']:
+                        self._parse_group(subgroup, group_data['children'][subgroup])
+                        self.inventory.add_child(group, subgroup)
 
-            if group_data.get('hosts', False):
-                for host_pattern in group_data['hosts']:
-                    hosts, port = self._parse_host(host_pattern)
-                    self.populate_host_vars(hosts, group_data['hosts'][host_pattern] or {}, group, port)
+                elif key == 'hosts':
+                    for host_pattern in group_data['hosts']:
+                        hosts, port = self._parse_host(host_pattern)
+                        self.populate_host_vars(hosts, group_data['hosts'][host_pattern] or {}, group, port)
+                else:
+                    self.display.warning('Skipping unexpected key (%s) in group (%s), only "vars", "children" and "hosts" are valid' % (key, group))
 
     def _parse_host(self, host_pattern):
         '''

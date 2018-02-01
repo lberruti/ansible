@@ -151,10 +151,16 @@ class Cli:
             if check_rc and rc != 0:
                 self._module.fail_json(msg=to_text(err, errors='surrogate_then_replace'))
 
-            try:
-                out = self._module.from_json(out)
-            except ValueError:
-                out = str(out).strip()
+            if not check_rc and rc != 0:
+                try:
+                    out = self._module.from_json(err)
+                except ValueError:
+                    out = to_text(err, errors='surrogate_then_replace').strip()
+            else:
+                try:
+                    out = self._module.from_json(out)
+                except ValueError:
+                    out = to_text(out, errors='surrogate_then_replace').strip()
 
             responses.append(out)
         return responses
@@ -170,7 +176,13 @@ class Cli:
         msgs = []
         for cmd in config:
             rc, out, err = self.exec_command(cmd)
-            if rc != 0:
+            if rc != 0 and 'no graceful-restart' in err:
+                if 'ISSU/HA will be affected if Graceful Restart is disabled' in err:
+                    out = ''
+                    msgs.append(out)
+                else:
+                    self._module.fail_json(msg=to_text(err, errors='surrogate_then_replace'))
+            elif rc != 0:
                 self._module.fail_json(msg=to_text(err, errors='surrogate_then_replace'))
             elif out:
                 msgs.append(out)

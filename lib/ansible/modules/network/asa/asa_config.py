@@ -58,7 +58,7 @@ options:
         a change needs to be made.  This allows the playbook designer
         the opportunity to perform configuration commands prior to pushing
         any changes without affecting how the set of commands are matched
-        against the system
+        against the system.
     required: false
     default: null
   after:
@@ -270,7 +270,7 @@ def run(module, result):
 
     if module.params['save']:
         if not module.check_mode:
-            module.config.save_config()
+            run_commands(module, 'write mem')
         result['changed'] = True
 
 def main():

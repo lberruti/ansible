@@ -727,31 +727,53 @@ def install(module, items, repoq, yum_basecmd, conf_file, en_repos, dis_repos, i
         downgrade_candidate = False
 
         # check if pkgspec is installed (if possible for idempotence)
-        # localpkg
-        if spec.endswith('.rpm') and '://' not in spec:
-            # get the pkg name-v-r.arch
-            if not os.path.exists(spec):
+        if spec.endswith('.rpm'):
+            if '://' not in spec and not os.path.exists(spec):
                 res['msg'] += "No RPM file matching '%s' found on system" % spec
                 res['results'].append("No RPM file matching '%s' found on system" % spec)
-                res['rc'] = 127 # Ensure the task fails in with-loop
+                res['rc'] = 127  # Ensure the task fails in with-loop
                 module.fail_json(**res)
 
-            envra = local_envra(module, spec)
+            if '://' in spec:
+                package = fetch_rpm_from_url(spec, module=module)
+            else:
+                package = spec
 
-            # look for them in the rpmdb
-            if is_installed(module, repoq, envra, conf_file, en_repos=en_repos, dis_repos=dis_repos, installroot=installroot):
-                # if they are there, skip it
-                continue
-            pkg = spec
-
-        # URL
-        elif '://' in spec:
-            # download package so that we can check if it's already installed
-            package = fetch_rpm_from_url(spec, module=module)
+            # most common case is the pkg is already installed
             envra = local_envra(module, package)
-            if is_installed(module, repoq, envra, conf_file, en_repos=en_repos, dis_repos=dis_repos, installroot=installroot):
-                # if it's there, skip it
+            installed_pkgs = is_installed(module, repoq, envra, conf_file, en_repos=en_repos, dis_repos=dis_repos, installroot=installroot)
+            if installed_pkgs:
+                res['results'].append('%s providing %s is already installed' % (installed_pkgs[0], package))
                 continue
+
+            (name, ver, rel, epoch, arch) = splitFilename(envra)
+            installed_pkgs = is_installed(module, repoq, name, conf_file, en_repos=en_repos, dis_repos=dis_repos, installroot=installroot)
+
+            # case for two same envr but differrent archs like x86_64 and i686
+            if len(installed_pkgs) == 2:
+                (cur_name0, cur_ver0, cur_rel0, cur_epoch0, cur_arch0) = splitFilename(installed_pkgs[0])
+                (cur_name1, cur_ver1, cur_rel1, cur_epoch1, cur_arch1) = splitFilename(installed_pkgs[1])
+                cur_epoch0 = cur_epoch0 or '0'
+                cur_epoch1 = cur_epoch1 or '0'
+                compare = compareEVR((cur_epoch0, cur_ver0, cur_rel0), (cur_epoch1, cur_ver1, cur_rel1))
+                if compare == 0 and cur_arch0 != cur_arch1:
+                    for installed_pkg in installed_pkgs:
+                        if installed_pkg.endswith(arch):
+                            installed_pkgs = [installed_pkg]
+
+            # TODO support downgrade for rpm files
+            if len(installed_pkgs) == 1:
+                installed_pkg = installed_pkgs[0]
+                (cur_name, cur_ver, cur_rel, cur_epoch, cur_arch) = splitFilename(installed_pkg)
+                cur_epoch = cur_epoch or '0'
+                compare = compareEVR((cur_epoch, cur_ver, cur_rel), (epoch, ver, rel))
+
+                # compare > 0 (higher version is installed) or compare == 0 (exact version is installed)
+                if compare >= 0:
+                    continue
+            # else: if there are more installed packages with the same name, that would mean
+            # kernel, gpg-pubkey or like, so just let yum deal with it and try to install it
+
             pkg = package
 
         # groups
@@ -1101,7 +1123,8 @@ def latest(module, items, repoq, yum_basecmd, conf_file, en_repos, dis_repos, in
         res['changed'] = True
     elif len(pkgs['install']) or len(will_update):
         cmd = yum_basecmd + ['install'] + pkgs['install'] + pkgs['update']
-        rc, out, err = module.run_command(cmd)
+        lang_env = dict(LANG='C', LC_ALL='C', LC_MESSAGES='C')
+        rc, out, err = module.run_command(cmd, environ_update=lang_env)
         out_lower = out.strip().lower()
         if not out_lower.endswith("no packages marked for update") and \
                 not out_lower.endswith("nothing to do"):

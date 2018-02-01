@@ -110,19 +110,13 @@ class AdHocCLI(CLI):
 
         loader, inventory, variable_manager = self._play_prereqs(self.options)
 
-        no_hosts = False
-        if len(inventory.list_hosts()) == 0:
-            # Empty inventory
-            display.warning("provided hosts list is empty, only localhost is available")
-            no_hosts = True
-
-        inventory.subset(self.options.subset)
-        hosts = inventory.list_hosts(pattern)
-        if len(hosts) == 0:
-            if no_hosts is False and self.options.subset:
-                # Invalid limit
-                raise AnsibleError("Specified --limit does not match any hosts")
+        try:
+            hosts = CLI.get_host_list(inventory, self.options.subset, pattern)
+        except AnsibleError:
+            if self.options.subset:
+                raise
             else:
+                hosts = []
                 display.warning("No hosts matched, nothing to do")
 
         if self.options.listhosts:
@@ -138,7 +132,7 @@ class AdHocCLI(CLI):
             raise AnsibleOptionsError(err)
 
         # Avoid modules that don't work with ad-hoc
-        if self.options.module_name in ('include', 'include_role'):
+        if self.options.module_name.startswith(('include', 'import_')):
             raise AnsibleOptionsError("'%s' is not a valid action for ad-hoc commands" % self.options.module_name)
 
         play_ds = self._play_ds(pattern, self.options.seconds, self.options.poll_interval)

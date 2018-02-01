@@ -26,7 +26,6 @@ from ansible.errors import AnsibleError
 from ansible.inventory.group import Group
 from ansible.inventory.host import Host
 from ansible.module_utils.six import iteritems
-from ansible.plugins.cache import FactCache
 from ansible.utils.vars import combine_vars
 from ansible.utils.path import basedir
 
@@ -62,9 +61,6 @@ class InventoryData(object):
             self.add_group(group)
         self.add_child('all', 'ungrouped')
 
-        # prime cache
-        self.cache = FactCache()
-
     def serialize(self):
         data = dict()
         return data
@@ -79,23 +75,18 @@ class InventoryData(object):
         else:
             new_host = Host(pattern)
 
-            # use 'all' vars but not part of all group
-            new_host.vars = self.groups['all'].get_vars()
-
             new_host.address = "127.0.0.1"
             new_host.implicit = True
 
-            if "ansible_python_interpreter" not in new_host.vars:
-                py_interp = sys.executable
-                if not py_interp:
-                    # sys.executable is not set in some cornercases.  #13585
-                    py_interp = '/usr/bin/python'
-                    display.warning('Unable to determine python interpreter from sys.executable. Using /usr/bin/python default. '
-                                    'You can correct this by setting ansible_python_interpreter for localhost')
-                new_host.set_variable("ansible_python_interpreter", py_interp)
-
-            if "ansible_connection" not in new_host.vars:
-                new_host.set_variable("ansible_connection", 'local')
+            # set localhost defaults
+            py_interp = sys.executable
+            if not py_interp:
+                # sys.executable is not set in some cornercases. see issue #13585
+                py_interp = '/usr/bin/python'
+                display.warning('Unable to determine python interpreter from sys.executable. Using /usr/bin/python default. '
+                                'You can correct this by setting ansible_python_interpreter for localhost')
+            new_host.set_variable("ansible_python_interpreter", py_interp)
+            new_host.set_variable("ansible_connection", 'local')
 
             self.localhost = new_host
 
@@ -124,10 +115,6 @@ class InventoryData(object):
 
             mygroups = host.get_groups()
 
-            # ensure hosts are always in 'all'
-            if 'all' not in mygroups and not host.implicit:
-                self.add_child('all', host.name)
-
             if self.groups['ungrouped'] in mygroups:
                 # clear ungrouped of any incorrectly stored by parser
                 if set(mygroups).difference(set([self.groups['all'], self.groups['ungrouped']])):
@@ -136,7 +123,7 @@ class InventoryData(object):
             elif not host.implicit:
                 # add ungrouped hosts to ungrouped, except implicit
                 length = len(mygroups)
-                if length == 0 or (length == 1 and all in mygroups):
+                if length == 0 or (length == 1 and self.groups['all'] in mygroups):
                     self.add_child('ungrouped', host.name)
 
             # special case for implicit hosts

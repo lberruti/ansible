@@ -155,26 +155,26 @@ To get a random item from a list::
     "{{ ['a','b','c']|random }}"
     # => 'c'
 
-To get a random number from 0 to supplied end::
+To get a random number between 0 and a specified number::
 
-    "{{ 59 |random}} * * * * root /script/from/cron"
+    "{{ 60 |random}} * * * * root /script/from/cron"
     # => '21 * * * * root /script/from/cron'
 
 Get a random number from 0 to 100 but in steps of 10::
 
-    {{ 100 |random(step=10) }}
+    {{ 101 |random(step=10) }}
     # => 70
 
 Get a random number from 1 to 100 but in steps of 10::
 
-    {{ 100 |random(1, 10) }}
+    {{ 101 |random(1, 10) }}
     # => 31
-    {{ 100 |random(start=1, step=10) }}
+    {{ 101 |random(start=1, step=10) }}
     # => 51
 
 As of Ansible version 2.3, it's also possible to initialize the random number generator from a seed. This way, you can create random-but-idempotent numbers::
 
-    "{{ 59 |random(seed=inventory_hostname) }} * * * * root /script/from/cron"
+    "{{ 60 |random(seed=inventory_hostname) }} * * * * root /script/from/cron"
 
 
 Shuffle Filter
@@ -695,11 +695,11 @@ To add quotes for shell usage::
 
 To use one value on true and another on false (new in version 1.9)::
 
-   {{ (name == "John") | ternary('Mr','Ms') }}
+    {{ (name == "John") | ternary('Mr','Ms') }}
 
 To concatenate a list into a string::
 
-   {{ list | join(" ") }}
+    {{ list | join(" ") }}
 
 To get the last name of a file path, like 'foo.txt' out of '/etc/asdf/foo.txt'::
 
@@ -735,7 +735,7 @@ To expand a path containing a tilde (`~`) character (new in version 1.5)::
 
 To get the real path of a link (new in version 1.8)::
 
-   {{ path | realpath }}
+    {{ path | realpath }}
 
 To get the relative path of a link, from a start point (new in version 1.7)::
 

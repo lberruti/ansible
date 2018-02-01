@@ -87,7 +87,7 @@ import errno
 import datetime
 from collections import deque
 from collections import Mapping, MutableMapping, Sequence, MutableSequence, Set, MutableSet
-from itertools import repeat, chain
+from itertools import chain, repeat
 
 try:
     import syslog
@@ -137,6 +137,11 @@ except ImportError:
     except SyntaxError:
         print('\n{"msg": "SyntaxError: probably due to installed simplejson being for a different python version", "failed": true}')
         sys.exit(1)
+    else:
+        sj_version = json.__version__.split('.')
+        if sj_version < ['1', '6']:
+            # Version 1.5 released 2007-01-18 does not have the encoding parameter which we need
+            print('\n{"msg": "Error: Ansible requires the stdlib json or simplejson >= 1.6.  Neither was found!", "failed": true}')
 
 AVAILABLE_HASH_ALGORITHMS = dict()
 try:
@@ -763,15 +768,32 @@ def get_flags_from_attributes(attributes):
     return ''.join(flags)
 
 
+def _json_encode_fallback(obj):
+    if isinstance(obj, Set):
+        return list(obj)
+    elif isinstance(obj, datetime.datetime):
+        return obj.isoformat()
+    raise TypeError("Cannot json serialize %s" % to_native(obj))
+
+
+def jsonify(data, **kwargs):
+    for encoding in ("utf-8", "latin-1"):
+        try:
+            return json.dumps(data, encoding=encoding, default=_json_encode_fallback, **kwargs)
+        # Old systems using old simplejson module does not support encoding keyword.
+        except TypeError:
+            try:
+                new_data = json_dict_bytes_to_unicode(data, encoding=encoding)
+            except UnicodeDecodeError:
+                continue
+            return json.dumps(new_data, default=_json_encode_fallback, **kwargs)
+        except UnicodeDecodeError:
+            continue
+    raise UnicodeError('Invalid unicode encoding encountered')
+
+
 class AnsibleFallbackNotFound(Exception):
     pass
-
-
-class _SetEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, Set):
-            return list(obj)
-        return super(_SetEncoder, self).default(obj)
 
 
 class AnsibleModule(object):
@@ -801,6 +823,7 @@ class AnsibleModule(object):
         self._debug = False
         self._diff = False
         self._socket_path = None
+        self._shell = None
         self._verbosity = 0
         # May be used to set modifications to the environment for any
         # run_command invocation
@@ -811,7 +834,7 @@ class AnsibleModule(object):
         self.aliases = {}
         self._legal_inputs = ['_ansible_check_mode', '_ansible_no_log', '_ansible_debug', '_ansible_diff', '_ansible_verbosity',
                               '_ansible_selinux_special_fs', '_ansible_module_name', '_ansible_version', '_ansible_syslog_facility',
-                              '_ansible_socket']
+                              '_ansible_socket', '_ansible_shell_executable']
         self._options_context = list()
 
         if add_file_common_args:
@@ -1067,6 +1090,10 @@ class AnsibleModule(object):
 
         if not HAVE_SELINUX or not self.selinux_enabled():
             return changed
+
+        if self.check_file_absent_if_check_mode(path):
+            return True
+
         cur_context = self.selinux_context(path)
         new_context = list(cur_context)
         # Iterate over the current context instead of the
@@ -1105,11 +1132,17 @@ class AnsibleModule(object):
         return changed
 
     def set_owner_if_different(self, path, owner, changed, diff=None, expand=True):
+
+        if owner is None:
+            return changed
+
         b_path = to_bytes(path, errors='surrogate_or_strict')
         if expand:
             b_path = os.path.expanduser(os.path.expandvars(b_path))
-        if owner is None:
-            return changed
+
+        if self.check_file_absent_if_check_mode(b_path):
+            return True
+
         orig_uid, orig_gid = self.user_and_group(b_path, expand)
         try:
             uid = int(owner)
@@ -1140,11 +1173,17 @@ class AnsibleModule(object):
         return changed
 
     def set_group_if_different(self, path, group, changed, diff=None, expand=True):
+
+        if group is None:
+            return changed
+
         b_path = to_bytes(path, errors='surrogate_or_strict')
         if expand:
             b_path = os.path.expanduser(os.path.expandvars(b_path))
-        if group is None:
-            return changed
+
+        if self.check_file_absent_if_check_mode(b_path):
+            return True
+
         orig_uid, orig_gid = self.user_and_group(b_path, expand)
         try:
             gid = int(group)
@@ -1175,13 +1214,17 @@ class AnsibleModule(object):
         return changed
 
     def set_mode_if_different(self, path, mode, changed, diff=None, expand=True):
+
+        if mode is None:
+            return changed
+
         b_path = to_bytes(path, errors='surrogate_or_strict')
         if expand:
             b_path = os.path.expanduser(os.path.expandvars(b_path))
         path_stat = os.lstat(b_path)
 
-        if mode is None:
-            return changed
+        if self.check_file_absent_if_check_mode(b_path):
+            return True
 
         if not isinstance(mode, int):
             try:
@@ -1259,6 +1302,9 @@ class AnsibleModule(object):
         if expand:
             b_path = os.path.expanduser(os.path.expandvars(b_path))
 
+        if self.check_file_absent_if_check_mode(b_path):
+            return True
+
         existing = self.get_file_attributes(b_path)
 
         if existing.get('attr_flags', '') != attributes:
@@ -1281,9 +1327,8 @@ class AnsibleModule(object):
                         if rc != 0 or err:
                             raise Exception("Error while setting attributes: %s" % (out + err))
                     except Exception as e:
-                        path = to_text(b_path)
-                        self.fail_json(path=path, msg='chattr failed', details=to_native(e),
-                                       exception=traceback.format_exc())
+                        self.fail_json(path=to_text(b_path), msg='chattr failed',
+                                       details=to_native(e), exception=traceback.format_exc())
         return changed
 
     def get_file_attributes(self, path):
@@ -1294,7 +1339,7 @@ class AnsibleModule(object):
             try:
                 rc, out, err = self.run_command(attrcmd)
                 if rc == 0:
-                    res = out.split(' ')[0:2]
+                    res = out.split()
                     output['attr_flags'] = res[1].replace('-', '').strip()
                     output['version'] = res[0].strip()
                     output['attributes'] = format_attributes(output['attr_flags'])
@@ -1454,6 +1499,9 @@ class AnsibleModule(object):
         )
         return changed
 
+    def check_file_absent_if_check_mode(self, file_path):
+        return self.check_mode and not os.path.exists(file_path)
+
     def set_directory_attributes_if_different(self, file_args, changed, diff=None, expand=True):
         return self.set_fs_attributes_if_different(file_args, changed, diff, expand)
 
@@ -1612,6 +1660,9 @@ class AnsibleModule(object):
 
             elif k == '_ansible_socket':
                 self._socket_path = v
+
+            elif k == '_ansible_shell_executable' and v:
+                self._shell = v
 
             elif check_invalid_arguments and k not in legal_inputs:
                 unsupported_parameters.add(k)
@@ -2197,19 +2248,10 @@ class AnsibleModule(object):
             self.fail_json(msg=to_native(e))
 
     def jsonify(self, data):
-        for encoding in ("utf-8", "latin-1"):
-            try:
-                return json.dumps(data, encoding=encoding, cls=_SetEncoder)
-            # Old systems using old simplejson module does not support encoding keyword.
-            except TypeError:
-                try:
-                    new_data = json_dict_bytes_to_unicode(data, encoding=encoding)
-                except UnicodeDecodeError:
-                    continue
-                return json.dumps(new_data, cls=_SetEncoder)
-            except UnicodeDecodeError:
-                continue
-        self.fail_json(msg='Invalid unicode encoding encountered')
+        try:
+            return jsonify(data)
+        except UnicodeError as e:
+            self.fail_json(msg=to_text(e))
 
     def from_json(self, data):
         return json.loads(data)
@@ -2394,8 +2436,7 @@ class AnsibleModule(object):
 
         # Set the attributes
         current_attribs = self.get_file_attributes(src)
-        current_attribs = current_attribs.get('attr_flags', [])
-        current_attribs = ''.join(current_attribs)
+        current_attribs = current_attribs.get('attr_flags', '')
         self.set_attributes_if_different(dest, current_attribs, True)
 
     def atomic_move(self, src, dest, unsafe_writes=False):
@@ -2533,6 +2574,7 @@ class AnsibleModule(object):
         # sadly there are some situations where we cannot ensure atomicity, but only if
         # the user insists and we get the appropriate error we update the file unsafely
         try:
+            out_dest = in_src = None
             try:
                 out_dest = open(dest, 'wb')
                 in_src = open(src, 'rb')
@@ -2601,24 +2643,37 @@ class AnsibleModule(object):
             strings on python3, use encoding=None to turn decoding to text off.
         '''
 
-        shell = False
-        if isinstance(args, list):
-            if use_unsafe_shell:
-                args = " ".join([shlex_quote(x) for x in args])
-                shell = True
-        elif isinstance(args, (binary_type, text_type)) and use_unsafe_shell:
-            shell = True
-        elif isinstance(args, (binary_type, text_type)):
-            # On python2.6 and below, shlex has problems with text type
-            # On python3, shlex needs a text type.
-            if PY2:
-                args = to_bytes(args, errors='surrogate_or_strict')
-            elif PY3:
-                args = to_text(args, errors='surrogateescape')
-            args = shlex.split(args)
-        else:
+        if not isinstance(args, (list, binary_type, text_type)):
             msg = "Argument 'args' to run_command must be list or string"
             self.fail_json(rc=257, cmd=args, msg=msg)
+
+        shell = False
+        if use_unsafe_shell:
+
+            # stringify args for unsafe/direct shell usage
+            if isinstance(args, list):
+                args = " ".join([shlex_quote(x) for x in args])
+
+            # not set explicitly, check if set by controller
+            if executable:
+                args = [executable, '-c', args]
+            elif self._shell not in (None, '/bin/sh'):
+                args = [self._shell, '-c', args]
+            else:
+                shell = True
+        else:
+            # ensure args are a list
+            if isinstance(args, (binary_type, text_type)):
+                # On python2.6 and below, shlex has problems with text type
+                # On python3, shlex needs a text type.
+                if PY2:
+                    args = to_bytes(args, errors='surrogate_or_strict')
+                elif PY3:
+                    args = to_text(args, errors='surrogateescape')
+                args = shlex.split(args)
+
+            # expand shellisms
+            args = [os.path.expanduser(os.path.expandvars(x)) for x in args if x is not None]
 
         prompt_re = None
         if prompt_regex:
@@ -2631,10 +2686,6 @@ class AnsibleModule(object):
                 prompt_re = re.compile(prompt_regex, re.MULTILINE)
             except re.error:
                 self.fail_json(msg="invalid prompt regular expression given to run_command")
-
-        # expand things like $HOME and ~
-        if not shell:
-            args = [os.path.expanduser(os.path.expandvars(x)) for x in args if x is not None]
 
         rc = 0
         msg = None

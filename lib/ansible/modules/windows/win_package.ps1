@@ -36,6 +36,16 @@ if (-not $validate_certs) {
     [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
 }
 
+# Enable TLS1.1/TLS1.2 if they're available but disabled (eg. .NET 4.5)
+$security_protcols = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::SystemDefault
+if ([Net.SecurityProtocolType].GetMember("Tls11").Count -gt 0) {
+    $security_protcols = $security_protcols -bor [Net.SecurityProtocolType]::Tls11
+}
+if ([Net.SecurityProtocolType].GetMember("Tls12").Count -gt 0) {
+    $security_protcols = $security_protcols -bor [Net.SecurityProtocolType]::Tls12
+}
+[Net.ServicePointManager]::SecurityProtocol = $security_protcols
+
 $credential = $null
 if ($username -ne $null) {
     $sec_user_password = ConvertTo-SecureString -String $password -AsPlainText -Force
@@ -221,7 +231,7 @@ Function Get-ProgramMetadata($state, $path, $product_id, $credential, $creates_p
 
     # set the location type and validate the path
     if ($path -ne $null) {
-        if ($path.EndsWith(".msi")) {
+        if ($path.EndsWith(".msi", [System.StringComparison]::CurrentCultureIgnoreCase)) {
             $metadata.msi = $true
         } else {
             $metadata.msi = $false

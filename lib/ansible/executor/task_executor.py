@@ -46,6 +46,24 @@ except ImportError:
 __all__ = ['TaskExecutor']
 
 
+def remove_omit(task_args, omit_token):
+    '''
+    Remove args with a value equal to the ``omit_token`` recursively
+    to align with now having suboptions in the argument_spec
+    '''
+    new_args = {}
+
+    for i in iteritems(task_args):
+        if i[1] == omit_token:
+            continue
+        elif isinstance(i[1], dict):
+            new_args[i[0]] = remove_omit(i[1], omit_token)
+        else:
+            new_args[i[0]] = i[1]
+
+    return new_args
+
+
 class TaskExecutor:
 
     '''
@@ -102,9 +120,14 @@ class TaskExecutor:
                     for item in item_results:
                         if 'changed' in item and item['changed'] and not res.get('changed'):
                             res['changed'] = True
-                        if 'failed' in item and item['failed'] and not res.get('failed'):
-                            res['failed'] = True
-                            res['msg'] = 'One or more items failed'
+                        if 'failed' in item and item['failed']:
+                            item_ignore = item.pop('_ansible_ignore_errors')
+                            if not res.get('failed'):
+                                res['failed'] = True
+                                res['msg'] = 'One or more items failed'
+                                self._task.ignore_errors = item_ignore
+                            elif self._task.ignore_errors and not item_ignore:
+                                self._task.ignore_errors = item_ignore
 
                         # ensure to accumulate these
                         for array in ['warnings', 'deprecations']:
@@ -289,6 +312,7 @@ class TaskExecutor:
             (self._task, tmp_task) = (tmp_task, self._task)
             (self._play_context, tmp_play_context) = (tmp_play_context, self._play_context)
             res = self._execute(variables=task_vars)
+            task_fields = self._task.dump_attrs()
             (self._task, tmp_task) = (tmp_task, self._task)
             (self._play_context, tmp_play_context) = (tmp_play_context, self._play_context)
 
@@ -296,6 +320,7 @@ class TaskExecutor:
             # to the list of results
             res[loop_var] = item
             res['_ansible_item_result'] = True
+            res['_ansible_ignore_errors'] = task_fields.get('ignore_errors')
 
             if label is not None:
                 templar = Templar(loader=self._loader, shared_loader_obj=self._shared_loader_obj, variables=self._job_vars)
@@ -306,7 +331,7 @@ class TaskExecutor:
                     self._host.name,
                     self._task._uuid,
                     res,
-                    task_fields=self._task.dump_attrs(),
+                    task_fields=task_fields,
                 ),
                 block=False,
             )
@@ -459,7 +484,7 @@ class TaskExecutor:
         # if this task is a IncludeRole, we just return now with a success code so the main thread can expand the task list for the given host
         elif self._task.action == 'include_role':
             include_variables = self._task.args.copy()
-            return dict(include_role=self._task, include_variables=include_variables)
+            return dict(include_variables=include_variables)
 
         # Now we do final validation on the task, which sets all fields to their final values.
         self._task.post_validate(templar=templar)
@@ -491,7 +516,7 @@ class TaskExecutor:
         # And filter out any fields which were set to default(omit), and got the omit token value
         omit_token = variables.get('omit')
         if omit_token is not None:
-            self._task.args = dict((i[0], i[1]) for i in iteritems(self._task.args) if i[1] != omit_token)
+            self._task.args = remove_omit(self._task.args, omit_token)
 
         # Read some values from the task, so that we can modify them if need be
         if self._task.until:

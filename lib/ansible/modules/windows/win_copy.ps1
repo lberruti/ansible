@@ -76,7 +76,7 @@ Function Copy-File($source, $dest) {
         }
 
         if (Test-Path -Path $dest -PathType Leaf) {
-            Remove-Item -Path $dest -Force -Recurse | Out-Null
+            Remove-Item -Path $dest -Force -Recurse -WhatIf:$check_mode | Out-Null
             $diff += "-$dest`n"
         }
 
@@ -86,14 +86,6 @@ Function Copy-File($source, $dest) {
             Copy-Item -Path $source -Destination $dest -Force | Out-Null
         }
         $diff += "+$dest`n"
-
-        # make sure we set the attributes accordingly
-        if (-not $check_mode) {
-            $source_file = Get-Item -Path $source -Force
-            $dest_file = Get-Item -Path $dest -Force
-            $dest_file.Attributes = $source_file.Attributes
-            $dest_file.SetAccessControl($source_file.GetAccessControl())
-        }
 
         $result.changed = $true
     }
@@ -119,13 +111,6 @@ Function Copy-Folder($source, $dest) {
         New-Item -Path $dest -ItemType Container -WhatIf:$check_mode | Out-Null
         $diff += "+$dest\`n"
         $result.changed = $true
-
-        if (-not $check_mode) {
-            $source_folder = Get-Item -Path $source -Force
-            $dest_folder = Get-Item -Path $source -Force
-            $dest_folder.Attributes = $source_folder.Attributes
-            $dest_folder.SetAccessControl($source_folder.GetAccessControl())
-        }
     }
 
     $child_items = Get-ChildItem -Path $source -Force

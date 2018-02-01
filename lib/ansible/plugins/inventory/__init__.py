@@ -49,7 +49,7 @@ class BaseInventoryPlugin(object):
 
         self.inventory = None
         self.display = display
-        self.cache = cache
+        self.cache = cache or {}
 
     def parse(self, inventory, loader, path, cache=True):
         ''' Populates self.groups from the given data. Raises an error on any parse failure.  '''
@@ -142,10 +142,13 @@ class BaseInventoryPlugin(object):
                             continue
                         if isinstance(groups, string_types):
                             groups = [groups]
-                        for group_name in groups:
-                            if group_name not in self.inventory.groups:
-                                self.inventory.add_group(group_name)
+                        if isinstance(groups, list):
+                            for group_name in groups:
+                                if group_name not in self.inventory.groups:
+                                    self.inventory.add_group(group_name)
                                 self.inventory.add_child(group_name, host)
+                        else:
+                            raise AnsibleOptionsError("Invalid group name format, expected string or list of strings, got: %s" % type(groups))
                     else:
                         raise AnsibleOptionsError("No key supplied, invalid entry")
                 else:
