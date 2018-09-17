@@ -196,7 +196,7 @@ def delegate_docker(args, exclude, require, integration_targets):
 
     if isinstance(args, TestConfig):
         if args.coverage and not args.coverage_label:
-            image_label = re.sub('^ansible/ansible:', '', args.docker)
+            image_label = args.docker_raw
             image_label = re.sub('[^a-zA-Z0-9]+', '-', image_label)
             cmd += ['--coverage-label', 'docker-%s' % image_label]
 
@@ -237,6 +237,9 @@ def delegate_docker(args, exclude, require, integration_targets):
                 ])
 
             docker_socket = '/var/run/docker.sock'
+
+            if args.docker_seccomp != 'default':
+                test_options += ['--security-opt', 'seccomp=%s' % args.docker_seccomp]
 
             if os.path.exists(docker_socket):
                 test_options += ['--volume', '%s:%s' % (docker_socket, docker_socket)]

@@ -347,6 +347,7 @@ import pwd
 import shutil
 import socket
 import time
+import re
 
 from ansible.module_utils._text import to_native
 from ansible.module_utils.basic import load_platform_subclass, AnsibleModule
@@ -518,7 +519,10 @@ class User(object):
 
         if self.expires is not None:
             cmd.append('-e')
-            cmd.append(time.strftime(self.DATE_FORMAT, self.expires))
+            if self.expires < time.gmtime(0):
+                cmd.append('')
+            else:
+                cmd.append(time.strftime(self.DATE_FORMAT, self.expires))
 
         if self.password is not None:
             cmd.append('-p')
@@ -966,7 +970,10 @@ class FreeBsdUser(User):
 
         if self.expires is not None:
             cmd.append('-e')
-            cmd.append(time.strftime(self.DATE_FORMAT, self.expires))
+            if self.expires < time.gmtime(0):
+                cmd.append('0')
+            else:
+                cmd.append(time.strftime(self.DATE_FORMAT, self.expires))
 
         # system cannot be handled currently - should we error if its requested?
         # create the user
@@ -1008,10 +1015,11 @@ class FreeBsdUser(User):
             cmd.append(self.comment)
 
         if self.home is not None:
-            if (info[5] != self.home and self.move_home) or (not os.path.exists(self.home) and self.createhome):
+            if (info[5] != self.home and self.move_home) or (not os.path.exists(self.home) and self.create_home):
                 cmd.append('-m')
-            cmd.append('-d')
-            cmd.append(self.home)
+            if info[5] != self.home:
+                cmd.append('-d')
+                cmd.append(self.home)
 
             if self.skeleton is not None:
                 cmd.append('-k')
@@ -1489,6 +1497,9 @@ class SunOS(User):
                 line = line.strip()
                 if (line.startswith('#') or line == ''):
                     continue
+                m = re.match(r'^([^#]*)#(.*)$', line)
+                if m:  # The line contains a hash / comment
+                    line = m.group(1)
                 key, value = line.split('=')
                 if key == "MINWEEKS":
                     minweeks = value.rstrip('\n')

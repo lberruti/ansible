@@ -67,6 +67,7 @@ options:
         default: 'Storage'
         choices:
             - Storage
+            - StorageV2
             - BlobStorage
         version_added: "2.2"
     access_tier:
@@ -166,13 +167,14 @@ class AzureRMStorageAccount(AzureRMModuleBase):
             state=dict(default='present', choices=['present', 'absent']),
             force=dict(type='bool', default=False),
             tags=dict(type='dict'),
-            kind=dict(type='str', default='Storage', choices=['Storage', 'BlobStorage']),
+            kind=dict(type='str', default='Storage', choices=['Storage', 'StorageV2', 'BlobStorage']),
             access_tier=dict(type='str', choices=['Hot', 'Cool'])
         )
 
         if HAS_AZURE:
             for key in self.storage_models.SkuName:
-                self.module_arg_spec['account_type']['choices'].append(getattr(key, 'value'))
+                if getattr(key, 'value') not in self.module_arg_spec['account_type']['choices']:
+                    self.module_arg_spec['account_type']['choices'].append(getattr(key, 'value'))
 
         self.results = dict(
             changed=False,

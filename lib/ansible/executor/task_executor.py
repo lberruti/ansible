@@ -10,14 +10,15 @@ import time
 import json
 import subprocess
 import sys
+import termios
 import traceback
 
 from ansible import constants as C
 from ansible.errors import AnsibleError, AnsibleParserError, AnsibleUndefinedVariable, AnsibleConnectionFailure, AnsibleActionFail, AnsibleActionSkip
 from ansible.executor.task_result import TaskResult
 from ansible.module_utils.six import iteritems, string_types, binary_type
-from ansible.module_utils.six.moves import cPickle
 from ansible.module_utils._text import to_text, to_native
+from ansible.module_utils.connection import write_to_file_descriptor
 from ansible.playbook.conditional import Conditional
 from ansible.playbook.task import Task
 from ansible.template import Templar
@@ -170,9 +171,10 @@ class TaskExecutor:
             display.debug("done dumping result, returning")
             return res
         except AnsibleError as e:
-            return dict(failed=True, msg=wrap_var(to_text(e, nonstring='simplerepr')))
+            return dict(failed=True, msg=wrap_var(to_text(e, nonstring='simplerepr')), _ansible_no_log=self._play_context.no_log)
         except Exception as e:
-            return dict(failed=True, msg='Unexpected failure during module execution.', exception=to_text(traceback.format_exc()), stdout='')
+            return dict(failed=True, msg='Unexpected failure during module execution.', exception=to_text(traceback.format_exc()),
+                        stdout='', _ansible_no_log=self._play_context.no_log)
         finally:
             try:
                 self._connection.close()
@@ -302,6 +304,7 @@ class TaskExecutor:
             # Only squash with 'with_:' not with the 'loop:', 'magic' squashing can be removed once with_ loops are
             items = self._squash_items(items, loop_var, task_vars)
 
+        no_log = False
         for item_index, item in enumerate(items):
             task_vars[loop_var] = item
             if index_var:
@@ -336,6 +339,9 @@ class TaskExecutor:
             (self._task, tmp_task) = (tmp_task, self._task)
             (self._play_context, tmp_play_context) = (tmp_play_context, self._play_context)
 
+            # update 'general no_log' based on specific no_log
+            no_log = no_log or tmp_task.no_log
+
             # now update the result with the item info, and append the result
             # to the list of results
             res[loop_var] = item
@@ -358,6 +364,8 @@ class TaskExecutor:
             )
             results.append(res)
             del task_vars[loop_var]
+
+        self._task.no_log = no_log
 
         return results
 
@@ -915,26 +923,24 @@ class TaskExecutor:
             [python, find_file_in_path('ansible-connection'), to_text(os.getppid())],
             stdin=slave, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
-        stdin = os.fdopen(master, 'wb', 0)
         os.close(slave)
 
-        # Need to force a protocol that is compatible with both py2 and py3.
-        # That would be protocol=2 or less.
-        # Also need to force a protocol that excludes certain control chars as
-        # stdin in this case is a pty and control chars will cause problems.
-        # that means only protocol=0 will work.
-        src = cPickle.dumps(self._play_context.serialize(), protocol=0)
-        stdin.write(src)
-        stdin.write(b'\n#END_INIT#\n')
+        # We need to set the pty into noncanonical mode. This ensures that we
+        # can receive lines longer than 4095 characters (plus newline) without
+        # truncating.
+        old = termios.tcgetattr(master)
+        new = termios.tcgetattr(master)
+        new[3] = new[3] & ~termios.ICANON
 
-        src = cPickle.dumps(variables, protocol=0)
-        stdin.write(src)
-        stdin.write(b'\n#END_VARS#\n')
+        try:
+            termios.tcsetattr(master, termios.TCSANOW, new)
+            write_to_file_descriptor(master, variables)
+            write_to_file_descriptor(master, self._play_context.serialize())
 
-        stdin.flush()
-
-        (stdout, stderr) = p.communicate()
-        stdin.close()
+            (stdout, stderr) = p.communicate()
+        finally:
+            termios.tcsetattr(master, termios.TCSANOW, old)
+        os.close(master)
 
         if p.returncode == 0:
             result = json.loads(to_text(stdout, errors='surrogate_then_replace'))

@@ -296,7 +296,7 @@ def get_running_config(module, config=None):
         else:
             flags = ['all']
             contents = get_config(module, flags=flags)
-    return NetworkConfig(indent=2, contents=contents)
+    return NetworkConfig(indent=2, contents=contents, ignore_lines=module.params['diff_ignore_lines'])
 
 
 def get_candidate(module):
@@ -393,7 +393,7 @@ def main():
 
     try:
         info = get_capabilities(module)
-        api = info.get('network_api', 'nxapi')
+        api = info.get('network_api')
         device_info = info.get('device_info', {})
         os_platform = device_info.get('network_os_platform', '')
     except ConnectionError:

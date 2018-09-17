@@ -151,13 +151,19 @@ try:
         algorithms = ('md5', 'sha1', 'sha224', 'sha256', 'sha384', 'sha512')
     for algorithm in algorithms:
         AVAILABLE_HASH_ALGORITHMS[algorithm] = getattr(hashlib, algorithm)
-except ImportError:
+
+    # we may have been able to import md5 but it could still not be available
+    try:
+        hashlib.md5()
+    except ValueError:
+        algorithms.pop('md5', None)
+except Exception:
     import sha
     AVAILABLE_HASH_ALGORITHMS = {'sha1': sha.sha}
     try:
         import md5
         AVAILABLE_HASH_ALGORITHMS['md5'] = md5.md5
-    except ImportError:
+    except Exception:
         pass
 
 from ansible.module_utils.pycompat24 import get_exception, literal_eval
@@ -934,20 +940,35 @@ class AnsibleModule(object):
 
     @property
     def tmpdir(self):
-        # if _ansible_tmpdir was not set, the module needs to create it and
-        # clean it up once finished.
+        # if _ansible_tmpdir was not set and we have a remote_tmp,
+        # the module needs to create it and clean it up once finished.
+        # otherwise we create our own module tmp dir from the system defaults
         if self._tmpdir is None:
+            basedir = None
+
             basedir = os.path.expanduser(os.path.expandvars(self._remote_tmp))
             if not os.path.exists(basedir):
-                self.warn("Module remote_tmp %s did not exist and was created "
-                          "with a mode of 0700, this may cause issues when "
-                          "running as another user. To avoid this, create the "
-                          "remote_tmp dir with the correct permissions "
-                          "manually" % basedir)
-                os.makedirs(basedir, mode=0o700)
+                try:
+                    os.makedirs(basedir, mode=0o700)
+                except (OSError, IOError) as e:
+                    self.warn("Unable to use %s as temporary directory, "
+                              "failing back to system: %s" % (basedir, to_native(e)))
+                    basedir = None
+                else:
+                    self.warn("Module remote_tmp %s did not exist and was "
+                              "created with a mode of 0700, this may cause"
+                              " issues when running as another user. To "
+                              "avoid this, create the remote_tmp dir with "
+                              "the correct permissions manually" % basedir)
 
             basefile = "ansible-moduletmp-%s-" % time.time()
-            tmpdir = tempfile.mkdtemp(prefix=basefile, dir=basedir)
+            try:
+                tmpdir = tempfile.mkdtemp(prefix=basefile, dir=basedir)
+            except (OSError, IOError) as e:
+                self.fail_json(
+                    msg="Failed to create remote module tmp path at dir %s "
+                        "with prefix %s: %s" % (basedir, basefile, to_native(e))
+                )
             if not self._keep_remote_files:
                 atexit.register(shutil.rmtree, tmpdir)
             self._tmpdir = tmpdir
@@ -2590,7 +2611,8 @@ class AnsibleModule(object):
                                 if unsafe_writes and e.errno == errno.EBUSY:
                                     self._unsafe_writes(b_tmp_dest_name, b_dest)
                                 else:
-                                    self.fail_json(msg='Unable to rename file: %s to %s: %s' % (src, dest, to_native(e)),
+                                    self.fail_json(msg='Unable to make %s into to %s, failed final rename from %s: %s' %
+                                                       (src, dest, b_tmp_dest_name, to_native(e)),
                                                    exception=traceback.format_exc())
                         except (shutil.Error, OSError, IOError) as e:
                             self.fail_json(msg='Failed to replace file: %s to %s: %s' % (src, dest, to_native(e)),

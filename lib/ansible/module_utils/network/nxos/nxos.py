@@ -147,7 +147,22 @@ class Cli:
         """Run list of commands on remote device and return results
         """
         connection = self._get_connection()
-        return connection.run_commands(commands, check_rc)
+
+        try:
+            out = connection.run_commands(commands, check_rc)
+            if check_rc == 'retry_json':
+                capabilities = self.get_capabilities()
+                network_api = capabilities.get('network_api')
+
+                if network_api == 'cliconf' and out:
+                    for index, resp in enumerate(out):
+                        if 'Invalid command at' in resp and 'json' in resp:
+                            if commands[index]['output'] == 'json':
+                                commands[index]['output'] = 'text'
+                                out = connection.run_commands(commands, check_rc)
+            return out
+        except ConnectionError as exc:
+            self._module.fail_json(msg=to_text(exc))
 
     def load_config(self, config, return_error=False, opts=None):
         """Sends configuration commands to the remote device
@@ -309,7 +324,7 @@ class Nxapi:
             if response['ins_api'].get('outputs'):
                 output = response['ins_api']['outputs']['output']
                 for item in to_list(output):
-                    if check_status and item['code'] != '200':
+                    if check_status is True and item['code'] != '200':
                         if return_error:
                             result.append(item)
                         else:
@@ -378,8 +393,34 @@ class Nxapi:
         else:
             return []
 
+    def get_device_info(self):
+        device_info = {}
+
+        device_info['network_os'] = 'nxos'
+        reply = self.run_commands({'command': 'show version', 'output': 'json'})
+        data = reply[0]
+
+        platform_reply = self.run_commands({'command': 'show inventory', 'output': 'json'})
+        platform_info = platform_reply[0]
+
+        device_info['network_os_version'] = data.get('sys_ver_str') or data.get('kickstart_ver_str')
+        device_info['network_os_model'] = data['chassis_id']
+        device_info['network_os_hostname'] = data['host_name']
+        device_info['network_os_image'] = data.get('isan_file_name') or data.get('kick_file_name')
+
+        if platform_info:
+            inventory_table = platform_info['TABLE_inv']['ROW_inv']
+            for info in inventory_table:
+                if 'Chassis' in info['name']:
+                    device_info['network_os_platform'] = info['productid']
+
+        return device_info
+
     def get_capabilities(self):
-        return {}
+        result = {}
+        result['device_info'] = self.get_device_info()
+        result['network_api'] = 'nxapi'
+        return result
 
 
 def is_json(cmd):

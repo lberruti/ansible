@@ -94,9 +94,8 @@ options:
   env_file:
     version_added: "2.2"
     description:
-      - Path to a file containing environment variables I(FOO=BAR).
+      - Path to a file, present on the target, containing environment variables I(FOO=BAR).
       - If variable also present in C(env), then C(env) value will override.
-      - Requires docker-py >= 1.4.0.
   entrypoint:
     description:
       - Command that overwrites the default ENTRYPOINT of the image.
@@ -165,8 +164,10 @@ options:
       - Override default signal used to kill a running container.
   kernel_memory:
     description:
-      - "Kernel memory limit (format: <number>[<unit>]). Number is a positive integer.
-        Unit can be one of b, k, m, or g. Minimum is 4M."
+      - "Kernel memory limit (format: C(<number>[<unit>])). Number is a positive integer.
+        Unit can be C(B) (byte), C(K) (kibibyte, 1024B), C(M) (mebibyte), C(G) (gibibyte),
+        C(T) (tebibyte), or C(P) (pebibyte). Minimum is C(4M)."
+      - Omitting the unit defaults to bytes.
     default: 0
   labels:
      description:
@@ -176,16 +177,9 @@ options:
       - List of name aliases for linked containers in the format C(container_name:alias)
   log_driver:
     description:
-      - Specify the logging driver. Docker uses json-file by default.
-    choices:
-      - none
-      - json-file
-      - syslog
-      - journald
-      - gelf
-      - fluentd
-      - awslogs
-      - splunk
+      - Specify the logging driver. Docker uses I(json-file) by default.
+      - See L(here,https://docs.docker.com/config/containers/logging/configure/) for possible choices.
+    required: false
   log_options:
     description:
       - Dictionary of options specific to the chosen log_driver. See https://docs.docker.com/engine/admin/logging/overview/
@@ -197,18 +191,24 @@ options:
       - Container MAC address (e.g. 92:d0:c6:0a:29:33)
   memory:
     description:
-      - "Memory limit (format: <number>[<unit>]). Number is a positive integer.
-        Unit can be one of b, k, m, or g"
+      - "Memory limit (format: C(<number>[<unit>])). Number is a positive integer.
+        Unit can be C(B) (byte), C(K) (kibibyte, 1024B), C(M) (mebibyte), C(G) (gibibyte),
+        C(T) (tebibyte), or C(P) (pebibyte)."
+      - Omitting the unit defaults to bytes.
     default: '0'
   memory_reservation:
     description:
-      - "Memory soft limit (format: <number>[<unit>]). Number is a positive integer.
-        Unit can be one of b, k, m, or g"
+      - "Memory soft limit (format: C(<number>[<unit>])). Number is a positive integer.
+        Unit can be C(B) (byte), C(K) (kibibyte, 1024B), C(M) (mebibyte), C(G) (gibibyte),
+        C(T) (tebibyte), or C(P) (pebibyte)."
+      - Omitting the unit defaults to bytes.
     default: 0
   memory_swap:
     description:
-      - Total memory limit (memory + swap, format:<number>[<unit>]).
-        Number is a positive integer. Unit can be one of b, k, m, or g.
+      - "Total memory limit (memory + swap, format: C(<number>[<unit>])).
+        Number is a positive integer. Unit can be C(B) (byte), C(K) (kibibyte, 1024B),
+        C(M) (mebibyte), C(G) (gibibyte), C(T) (tebibyte), or C(P) (pebibyte)."
+      - Omitting the unit defaults to bytes.
     default: 0
   memory_swappiness:
     description:
@@ -234,6 +234,9 @@ options:
        - If included, C(links) or C(aliases) are lists.
        - For examples of the data structure and usage see EXAMPLES below.
        - To remove a container from one or more networks, use the C(purge_networks) option.
+       - Note that as opposed to C(docker run ...), M(docker_container) does not remove the default
+         network if C(networks) is specified. You need to explicity use C(purge_networks) to enforce
+         the removal of the default network (and all other networks not explicitly mentioned in C(networks)).
      version_added: "2.2"
   oom_killer:
     description:
@@ -315,9 +318,10 @@ options:
     default: 0
   shm_size:
     description:
-      - Size of `/dev/shm`. The format is `<number><unit>`. `number` must be greater than `0`.
-        Unit is optional and can be `b` (bytes), `k` (kilobytes), `m` (megabytes), or `g` (gigabytes).
-      - Omitting the unit defaults to bytes. If you omit the size entirely, the system uses `64m`.
+      - "Size of C(/dev/shm) (format: C(<number>[<unit>])). Number is positive integer.
+        Unit can be C(B) (byte), C(K) (kibibyte, 1024B), C(M) (mebibyte), C(G) (gibibyte),
+        C(T) (tebibyte), or C(P) (pebibyte)."
+      - Omitting the unit defaults to bytes. If you omit the size entirely, the system uses C(64M).
   security_opts:
     description:
       - List of security options in the form of C("label:user:User")
@@ -415,6 +419,14 @@ author:
 requirements:
     - "python >= 2.6"
     - "docker-py >= 1.7.0"
+    - "Please note that the L(docker-py,https://pypi.org/project/docker-py/) Python
+       module has been superseded by L(docker,https://pypi.org/project/docker/)
+       (see L(here,https://github.com/docker/docker-py/issues/1310) for details).
+       For Python 2.6, C(docker-py) must be used. Otherwise, it is recommended to
+       install the C(docker) Python module. Note that both modules should I(not)
+       be installed at the same time. Also note that when both modules are installed
+       and one of them is uninstalled, the other might no longer function and a
+       reinstall of it is required."
     - "Docker API >= 1.20"
 '''
 
@@ -549,6 +561,11 @@ EXAMPLES = '''
     name: sleepy
     purge_networks: yes
 
+- name: Start a container and use an env file
+  docker_container:
+    name: agent
+    image: jenkinsci/ssh-slave
+    env_file: /var/tmp/jenkins/agent.env
 '''
 
 RETURN = '''
@@ -598,9 +615,10 @@ docker_container:
 import os
 import re
 import shlex
+from distutils.version import LooseVersion
 
 from ansible.module_utils.basic import human_to_bytes
-from ansible.module_utils.docker_common import HAS_DOCKER_PY_2, HAS_DOCKER_PY_3, AnsibleDockerClient, DockerBaseClass
+from ansible.module_utils.docker_common import HAS_DOCKER_PY_2, HAS_DOCKER_PY_3, AnsibleDockerClient, DockerBaseClass, sanitize_result
 from ansible.module_utils.six import string_types
 
 try:
@@ -609,12 +627,14 @@ try:
         from docker.types import Ulimit, LogConfig
     else:
         from docker.utils.types import Ulimit, LogConfig
+    from ansible.module_utils.docker_common import docker_version
 except:
     # missing docker-py handled in ansible.module_utils.docker
     pass
 
 
 REQUIRES_CONVERSION_TO_BYTES = [
+    'kernel_memory',
     'memory',
     'memory_reservation',
     'memory_swap',
@@ -907,10 +927,9 @@ class TaskParameters(DockerBaseClass):
             devices='devices',
             pid_mode='pid_mode',
             tmpfs='tmpfs',
-            init='init'
         )
 
-        if HAS_DOCKER_PY_2 or HAS_DOCKER_PY_3:
+        if self.client.HAS_AUTO_REMOVE_OPT:
             # auto_remove is only supported in docker>=2
             host_config_params['auto_remove'] = 'auto_remove'
 
@@ -918,6 +937,9 @@ class TaskParameters(DockerBaseClass):
             # cpu_shares and volume_driver moved to create_host_config in > 3
             host_config_params['cpu_shares'] = 'cpu_shares'
             host_config_params['volume_driver'] = 'volume_driver'
+
+        if self.client.HAS_INIT_OPT:
+            host_config_params['init'] = 'init'
 
         params = dict()
         for key, value in host_config_params.items():
@@ -1228,7 +1250,6 @@ class Container(DockerBaseClass):
 
         # Map parameters to container inspect results
         config_mapping = dict(
-            auto_remove=host_config.get('AutoRemove'),
             expected_cmd=config.get('Cmd'),
             domainname=config.get('Domainname'),
             hostname=config.get('Hostname'),
@@ -1248,8 +1269,6 @@ class Container(DockerBaseClass):
             ipc_mode=host_config.get("IpcMode"),
             labels=config.get('Labels'),
             expected_links=host_config.get('Links'),
-            log_driver=log_config.get('Type'),
-            log_options=log_config.get('Config'),
             mac_address=network.get('MacAddress'),
             memory_swappiness=host_config.get('MemorySwappiness'),
             network_mode=host_config.get('NetworkMode'),
@@ -1261,7 +1280,6 @@ class Container(DockerBaseClass):
             expected_ports=host_config.get('PortBindings'),
             read_only=host_config.get('ReadonlyRootfs'),
             restart_policy=restart_policy.get('Name'),
-            restart_retries=restart_policy.get('MaximumRetryCount'),
             # Cannot test shm_size, as shm_size is not included in container inspection results.
             # shm_size=host_config.get('ShmSize'),
             security_opts=host_config.get("SecurityOpt"),
@@ -1274,9 +1292,21 @@ class Container(DockerBaseClass):
             expected_volumes=config.get('Volumes'),
             expected_binds=host_config.get('Binds'),
             volumes_from=host_config.get('VolumesFrom'),
-            volume_driver=host_config.get('VolumeDriver'),
-            working_dir=host_config.get('WorkingDir')
+            working_dir=config.get('WorkingDir')
         )
+        if self.parameters.restart_policy:
+            config_mapping['restart_retries'] = restart_policy.get('MaximumRetryCount')
+        if self.parameters.log_driver:
+            config_mapping['log_driver'] = log_config.get('Type')
+            config_mapping['log_options'] = log_config.get('Config')
+
+        if self.parameters.client.HAS_AUTO_REMOVE_OPT:
+            # auto_remove is only supported in docker>=2
+            config_mapping['auto_remove'] = host_config.get('AutoRemove')
+
+        if HAS_DOCKER_PY_3:
+            # volume_driver moved to create_host_config in > 3
+            config_mapping['volume_driver'] = host_config.get('VolumeDriver')
 
         differences = []
         for key, value in config_mapping.items():
@@ -1374,7 +1404,6 @@ class Container(DockerBaseClass):
             cpu_quota=host_config.get('CpuQuota'),
             cpuset_cpus=host_config.get('CpusetCpus'),
             cpuset_mems=host_config.get('CpusetMems'),
-            cpu_shares=host_config.get('CpuShares'),
             kernel_memory=host_config.get("KernelMemory"),
             memory=host_config.get('Memory'),
             memory_reservation=host_config.get('MemoryReservation'),
@@ -1382,6 +1411,10 @@ class Container(DockerBaseClass):
             oom_score_adj=host_config.get('OomScoreAdj'),
             oom_killer=host_config.get('OomKillDisable'),
         )
+
+        if HAS_DOCKER_PY_3:
+            # cpu_shares moved to create_host_config in > 3
+            config_mapping['cpu_shares'] = host_config.get('CpuShares')
 
         differences = []
         for key, value in config_mapping.items():
@@ -1691,6 +1724,11 @@ class ContainerManager(DockerBaseClass):
 
         super(ContainerManager, self).__init__()
 
+        if client.module.params.get('log_options') and not client.module.params.get('log_driver'):
+            client.module.warn('log_options is ignored when log_driver is not specified')
+        if client.module.params.get('restart_retries') and not client.module.params.get('restart_policy'):
+            client.module.warn('restart_retries is ignored when restart_policy is not specified')
+
         self.client = client
         self.parameters = TaskParameters(client)
         self.check_mode = self.client.check_mode
@@ -1765,7 +1803,7 @@ class ContainerManager(DockerBaseClass):
             self.container_remove(container.Id)
 
     def fail(self, msg, **kwargs):
-        self.client.module.fail_json(msg=msg, **kwargs)
+        self.client.module.fail_json(msg=msg, **sanitize_result(kwargs))
 
     def _get_container(self, container):
         '''
@@ -1980,6 +2018,27 @@ class ContainerManager(DockerBaseClass):
         return response
 
 
+class AnsibleDockerClientContainer(AnsibleDockerClient):
+
+    def __init__(self, **kwargs):
+        super(AnsibleDockerClientContainer, self).__init__(**kwargs)
+
+        docker_api_version = self.version()['ApiVersion']
+        init_supported = LooseVersion(docker_api_version) >= LooseVersion('1.25')
+        if self.module.params.get("init") and not init_supported:
+            self.fail('docker API version is %s. Minimum version required is 1.25 to set init option.' % (docker_api_version,))
+
+        init_supported = init_supported and LooseVersion(docker_version) >= LooseVersion('2.2')
+        if self.module.params.get("init") and not init_supported:
+            self.fail("docker or docker-py version is %s. Minimum version required is 2.2 to set init option. "
+                      "If you use the 'docker-py' module, you have to switch to the docker 'Python' package." % (docker_version,))
+
+        self.HAS_INIT_OPT = init_supported
+        self.HAS_AUTO_REMOVE_OPT = HAS_DOCKER_PY_2 or HAS_DOCKER_PY_3
+        if self.module.params.get('auto_remove') and not self.HAS_AUTO_REMOVE_OPT:
+            self.fail("'auto_remove' is not compatible with the 'docker-py' Python package. It requires the newer 'docker' Python package.")
+
+
 def main():
     argument_spec = dict(
         auto_remove=dict(type='bool', default=False),
@@ -2016,9 +2075,7 @@ def main():
         kill_signal=dict(type='str'),
         labels=dict(type='dict'),
         links=dict(type='list'),
-        log_driver=dict(type='str',
-                        choices=['none', 'json-file', 'syslog', 'journald', 'gelf', 'fluentd', 'awslogs', 'splunk'],
-                        default=None),
+        log_driver=dict(type='str'),
         log_options=dict(type='dict', aliases=['log_opt']),
         mac_address=dict(type='str'),
         memory=dict(type='str', default='0'),
@@ -2064,17 +2121,14 @@ def main():
         ('state', 'present', ['image'])
     ]
 
-    client = AnsibleDockerClient(
+    client = AnsibleDockerClientContainer(
         argument_spec=argument_spec,
         required_if=required_if,
         supports_check_mode=True
     )
 
-    if (not (HAS_DOCKER_PY_2 or HAS_DOCKER_PY_3)) and client.module.params.get('auto_remove'):
-        client.module.fail_json(msg="'auto_remove' is not compatible with the 'docker-py' Python package. It requires the newer 'docker' Python package.")
-
     cm = ContainerManager(client)
-    client.module.exit_json(**cm.results)
+    client.module.exit_json(**sanitize_result(cm.results))
 
 
 if __name__ == '__main__':
