@@ -72,148 +72,183 @@ options:
     privatekey_passphrase:
         description:
             - The passphrase for the I(privatekey_path).
+            - This is required if the private key is password protected.
 
     selfsigned_version:
         default: 3
         description:
-            - Version of the C(selfsigned) certificate. Nowadays it should almost always be C(3).
+            - Version of the C(selfsigned) certificate.
+            - Nowadays it should almost always be C(3).
+            - This is only used by the C(selfsigned) provider.
         version_added: "2.5"
 
     selfsigned_digest:
         default: "sha256"
         description:
             - Digest algorithm to be used when self-signing the certificate
+            - This is only used by the C(selfsigned) provider.
 
     selfsigned_not_before:
         description:
             - The timestamp at which the certificate starts being valid. The timestamp is formatted as an ASN.1 TIME.
               If this value is not specified, certificate will start being valid from now.
+            - This is only used by the C(selfsigned) provider.
         aliases: [ selfsigned_notBefore ]
 
     selfsigned_not_after:
         description:
             - The timestamp at which the certificate stops being valid. The timestamp is formatted as an ASN.1 TIME.
               If this value is not specified, certificate will stop being valid 10 years from now.
+            - This is only used by the C(selfsigned) provider.
         aliases: [ selfsigned_notAfter ]
 
     ownca_path:
         description:
             - Remote absolute path of the CA (Certificate Authority) certificate.
+            - This is only used by the C(ownca) provider.
         version_added: "2.7"
 
     ownca_privatekey_path:
         description:
             - Path to the CA (Certificate Authority) private key to use when signing the certificate.
+            - This is only used by the C(ownca) provider.
         version_added: "2.7"
 
     ownca_privatekey_passphrase:
         description:
             - The passphrase for the I(ownca_privatekey_path).
+            - This is only used by the C(ownca) provider.
         version_added: "2.7"
 
     ownca_digest:
         default: "sha256"
         description:
             - Digest algorithm to be used for the C(ownca) certificate.
+            - This is only used by the C(ownca) provider.
         version_added: "2.7"
 
     ownca_version:
         default: 3
         description:
-            - Version of the C(ownca) certificate. Nowadays it should almost always be C(3).
+            - Version of the C(ownca) certificate.
+            - Nowadays it should almost always be C(3).
+            - This is only used by the C(ownca) provider.
         version_added: "2.7"
 
     ownca_not_before:
         description:
             - The timestamp at which the certificate starts being valid. The timestamp is formatted as an ASN.1 TIME.
               If this value is not specified, certificate will start being valid from now.
+            - This is only used by the C(ownca) provider.
         version_added: "2.7"
 
     ownca_not_after:
         description:
             - The timestamp at which the certificate stops being valid. The timestamp is formatted as an ASN.1 TIME.
               If this value is not specified, certificate will stop being valid 10 years from now.
+            - This is only used by the C(ownca) provider.
         version_added: "2.7"
 
     acme_accountkey_path:
         description:
             - Path to the accountkey for the C(acme) provider
+            - This is only used by the C(acme) provider.
 
     acme_challenge_path:
         description:
             - Path to the ACME challenge directory that is served on U(http://<HOST>:80/.well-known/acme-challenge/)
+            - This is only used by the C(acme) provider.
 
     acme_chain:
         default: True
         description:
             - Include the intermediate certificate to the generated certificate
+            - This is only used by the C(acme) provider.
         version_added: "2.5"
 
     signature_algorithms:
         description:
             - list of algorithms that you would accept the certificate to be signed with
               (e.g. ['sha256WithRSAEncryption', 'sha512WithRSAEncryption']).
+            - This is only used by the C(assertonly) provider.
 
     issuer:
         description:
             - Key/value pairs that must be present in the issuer name field of the certificate.
-              If you need to specify more than one value with the same key, use a list as value.
+            - If you need to specify more than one value with the same key, use a list as value.
+            - This is only used by the C(assertonly) provider.
 
     issuer_strict:
         default: False
         type: bool
         description:
             - If set to True, the I(issuer) field must contain only these values.
+            - This is only used by the C(assertonly) provider.
         version_added: "2.5"
 
     subject:
         description:
             - Key/value pairs that must be present in the subject name field of the certificate.
               If you need to specify more than one value with the same key, use a list as value.
+            - This is only used by the C(assertonly) provider.
 
     subject_strict:
         default: False
         type: bool
         description:
             - If set to True, the I(subject) field must contain only these values.
+            - This is only used by the C(assertonly) provider.
         version_added: "2.5"
 
     has_expired:
-        default: False
-        type: bool
         description:
             - Checks if the certificate is expired/not expired at the time the module is executed.
+            - This is only used by the C(assertonly) provider.
+        type: bool
+        default: no
 
     version:
         description:
-            - Version of the certificate. Nowadays it should almost always be 3.
+            - The version of the certificate.
+            - Nowadays it should almost always be 3.
+            - This is only used by the C(assertonly) provider.
 
     valid_at:
         description:
-            - The certificate must be valid at this point in time. The timestamp is formatted as an ASN.1 TIME.
+            - The certificate must be valid at this point in time.
+            - The timestamp is formatted as an ASN.1 TIME.
+            - This is only used by the C(assertonly) provider.
 
     invalid_at:
         description:
-            - The certificate must be invalid at this point in time. The timestamp is formatted as an ASN.1 TIME.
+            - The certificate must be invalid at this point in time.
+            - The timestamp is formatted as an ASN.1 TIME.
+            - This is only used by the C(assertonly) provider.
 
     not_before:
         description:
-            - The certificate must start to become valid at this point in time. The timestamp is formatted as an ASN.1 TIME.
+            - The certificate must start to become valid at this point in time.
+            - The timestamp is formatted as an ASN.1 TIME.
+            - This is only used by the C(assertonly) provider.
         aliases: [ notBefore ]
 
     not_after:
         description:
-            - The certificate must expire at this point in time. The timestamp is formatted as an ASN.1 TIME.
+            - The certificate must expire at this point in time.
+            - The timestamp is formatted as an ASN.1 TIME.
+            - This is only used by the C(assertonly) provider.
         aliases: [ notAfter ]
 
 
     valid_in:
         description:
             - The certificate must still be valid in I(valid_in) seconds from now.
+            - This is only used by the C(assertonly) provider.
 
     key_usage:
         description:
             - The I(key_usage) extension field must contain all these values.
+            - This is only used by the C(assertonly) provider.
         aliases: [ keyUsage ]
 
     key_usage_strict:
@@ -221,11 +256,13 @@ options:
         type: bool
         description:
             - If set to True, the I(key_usage) extension field must contain only these values.
+            - This is only used by the C(assertonly) provider.
         aliases: [ keyUsage_strict ]
 
     extended_key_usage:
         description:
             - The I(extended_key_usage) extension field must contain all these values.
+            - This is only used by the C(assertonly) provider.
         aliases: [ extendedKeyUsage ]
 
     extended_key_usage_strict:
@@ -233,11 +270,13 @@ options:
         type: bool
         description:
             - If set to True, the I(extended_key_usage) extension field must contain only these values.
+            - This is only used by the C(assertonly) provider.
         aliases: [ extendedKeyUsage_strict ]
 
     subject_alt_name:
         description:
             - The I(subject_alt_name) extension field must contain these values.
+            - This is only used by the C(assertonly) provider.
         aliases: [ subjectAltName ]
 
     subject_alt_name_strict:
@@ -245,6 +284,7 @@ options:
         type: bool
         description:
             - If set to True, the I(subject_alt_name) extension field must contain only these values.
+            - This is only used by the C(assertonly) provider.
         aliases: [ subjectAltName_strict ]
 extends_documentation_fragment: files
 notes:
@@ -521,11 +561,11 @@ class SelfSignedCertificate(Certificate):
             cert = crypto.X509()
             cert.set_serial_number(self.serial_number)
             if self.notBefore:
-                cert.set_notBefore(self.notBefore)
+                cert.set_notBefore(to_bytes(self.notBefore))
             else:
                 cert.gmtime_adj_notBefore(0)
             if self.notAfter:
-                cert.set_notAfter(self.notAfter)
+                cert.set_notAfter(to_bytes(self.notAfter))
             else:
                 # If no NotAfter specified, expire in
                 # 10 years. 315360000 is 10 years in seconds.
@@ -539,12 +579,7 @@ class SelfSignedCertificate(Certificate):
             cert.sign(self.privatekey, self.digest)
             self.cert = cert
 
-            try:
-                with open(self.path, 'wb') as cert_file:
-                    cert_file.write(crypto.dump_certificate(crypto.FILETYPE_PEM, self.cert))
-            except EnvironmentError as exc:
-                raise CertificateError(exc)
-
+            crypto_utils.write_file(module, crypto.dump_certificate(crypto.FILETYPE_PEM, self.cert))
             self.changed = True
 
         file_args = module.load_file_common_arguments(module.params)
@@ -618,11 +653,11 @@ class OwnCACertificate(Certificate):
             cert = crypto.X509()
             cert.set_serial_number(self.serial_number)
             if self.notBefore:
-                cert.set_notBefore(self.notBefore.encode())
+                cert.set_notBefore(to_bytes(self.notBefore))
             else:
                 cert.gmtime_adj_notBefore(0)
             if self.notAfter:
-                cert.set_notAfter(self.notAfter.encode())
+                cert.set_notAfter(to_bytes(self.notAfter))
             else:
                 # If no NotAfter specified, expire in
                 # 10 years. 315360000 is 10 years in seconds.
@@ -636,12 +671,7 @@ class OwnCACertificate(Certificate):
             cert.sign(self.ca_privatekey, self.digest)
             self.cert = cert
 
-            try:
-                with open(self.path, 'wb') as cert_file:
-                    cert_file.write(crypto.dump_certificate(crypto.FILETYPE_PEM, self.cert))
-            except EnvironmentError as exc:
-                raise CertificateError(exc)
-
+            crypto_utils.write_file(module, crypto.dump_certificate(crypto.FILETYPE_PEM, self.cert))
             self.changed = True
 
         file_args = module.load_file_common_arguments(module.params)
@@ -763,11 +793,18 @@ class AssertOnlyCertificate(Certificate):
                     )
 
         def _validate_has_expired():
-            if self.has_expired:
-                if self.has_expired != self.cert.has_expired():
-                    self.message.append(
-                        'Certificate expiration check failed (certificate expiration is %s, expected %s)' % (self.cert.has_expired(), self.has_expired)
-                    )
+            # The following 3 lines are the same as the current PyOpenSSL code for cert.has_expired().
+            # Older version of PyOpenSSL have a buggy implementation,
+            # to avoid issues with those we added the code from a more recent release here.
+
+            time_string = to_native(self.cert.get_notAfter())
+            not_after = datetime.datetime.strptime(time_string, "%Y%m%d%H%M%SZ")
+            cert_expired = not_after < datetime.datetime.utcnow()
+
+            if self.has_expired != cert_expired:
+                self.message.append(
+                    'Certificate expiration check failed (certificate expiration is %s, expected %s)' % (cert_expired, self.has_expired)
+                )
 
         def _validate_version():
             if self.version:
@@ -780,9 +817,11 @@ class AssertOnlyCertificate(Certificate):
 
         def _validate_keyUsage():
             if self.keyUsage:
+                found = False
                 for extension_idx in range(0, self.cert.get_extension_count()):
                     extension = self.cert.get_extension(extension_idx)
                     if extension.get_short_name() == b'keyUsage':
+                        found = True
                         keyUsage = [OpenSSL._util.lib.OBJ_txt2nid(keyUsage) for keyUsage in self.keyUsage]
                         current_ku = [OpenSSL._util.lib.OBJ_txt2nid(usage.strip()) for usage in
                                       to_bytes(extension, errors='surrogate_or_strict').split(b',')]
@@ -791,12 +830,16 @@ class AssertOnlyCertificate(Certificate):
                             self.message.append(
                                 'Invalid keyUsage component (got %s, expected all of %s to be present)' % (str(extension).split(', '), self.keyUsage)
                             )
+                if not found:
+                    self.message.append('Found no keyUsage extension')
 
         def _validate_extendedKeyUsage():
             if self.extendedKeyUsage:
+                found = False
                 for extension_idx in range(0, self.cert.get_extension_count()):
                     extension = self.cert.get_extension(extension_idx)
                     if extension.get_short_name() == b'extendedKeyUsage':
+                        found = True
                         extKeyUsage = [OpenSSL._util.lib.OBJ_txt2nid(keyUsage) for keyUsage in self.extendedKeyUsage]
                         current_xku = [OpenSSL._util.lib.OBJ_txt2nid(usage.strip()) for usage in
                                        to_bytes(extension, errors='surrogate_or_strict').split(b',')]
@@ -806,12 +849,16 @@ class AssertOnlyCertificate(Certificate):
                                 'Invalid extendedKeyUsage component (got %s, expected all of %s to be present)' % (str(extension).split(', '),
                                                                                                                    self.extendedKeyUsage)
                             )
+                if not found:
+                    self.message.append('Found no extendedKeyUsage extension')
 
         def _validate_subjectAltName():
             if self.subjectAltName:
+                found = False
                 for extension_idx in range(0, self.cert.get_extension_count()):
                     extension = self.cert.get_extension(extension_idx)
                     if extension.get_short_name() == b'subjectAltName':
+                        found = True
                         l_altnames = [altname.replace(b'IP Address', b'IP') for altname in
                                       to_bytes(extension, errors='surrogate_or_strict').split(b', ')]
                         if (not self.subjectAltName_strict and not all(x in l_altnames for x in self.subjectAltName)) or \
@@ -819,6 +866,8 @@ class AssertOnlyCertificate(Certificate):
                             self.message.append(
                                 'Invalid subjectAltName component (got %s, expected all of %s to be present)' % (l_altnames, self.subjectAltName)
                             )
+                if not found:
+                    self.message.append('Found no subjectAltName extension')
 
         def _validate_notBefore():
             if self.notBefore:
@@ -952,8 +1001,7 @@ class AcmeCertificate(Certificate):
                                                             self.csr_path,
                                                             self.challenge_path),
                                          check_rc=True)[1]
-                with open(self.path, 'wb') as certfile:
-                    certfile.write(to_bytes(crt))
+                crypto_utils.write_file(module, to_bytes(crt))
                 self.changed = True
             except OSError as exc:
                 raise CertificateError(exc)
@@ -987,6 +1035,8 @@ def main():
             # General properties of a certificate
             privatekey_path=dict(type='path'),
             privatekey_passphrase=dict(type='str', no_log=True),
+
+            # provider: assertonly
             signature_algorithms=dict(type='list'),
             subject=dict(type='dict'),
             subject_strict=dict(type='bool', default=False),
@@ -1041,7 +1091,7 @@ def main():
     if module.params['provider'] != 'assertonly' and module.params['csr_path'] is None:
         module.fail_json(msg='csr_path is required when provider is not assertonly')
 
-    base_dir = os.path.dirname(module.params['path'])
+    base_dir = os.path.dirname(module.params['path']) or '.'
     if not os.path.isdir(base_dir):
         module.fail_json(
             name=base_dir,

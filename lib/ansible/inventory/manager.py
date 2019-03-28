@@ -21,8 +21,13 @@ __metaclass__ = type
 
 import fnmatch
 import os
+import sys
 import re
 import itertools
+import traceback
+
+from operator import attrgetter
+from random import shuffle
 
 from ansible import constants as C
 from ansible.errors import AnsibleError, AnsibleOptionsError, AnsibleParserError
@@ -273,19 +278,21 @@ class InventoryManager(object):
                         break
                     except AnsibleParserError as e:
                         display.debug('%s was not parsable by %s' % (source, plugin_name))
-                        failures.append({'src': source, 'plugin': plugin_name, 'exc': e})
+                        tb = ''.join(traceback.format_tb(sys.exc_info()[2]))
+                        failures.append({'src': source, 'plugin': plugin_name, 'exc': e, 'tb': tb})
                     except Exception as e:
-                        display.debug('%s failed to parse %s' % (plugin_name, source))
-                        failures.append({'src': source, 'plugin': plugin_name, 'exc': AnsibleError(e)})
+                        display.debug('%s failed while attempting to parse %s' % (plugin_name, source))
+                        tb = ''.join(traceback.format_tb(sys.exc_info()[2]))
+                        failures.append({'src': source, 'plugin': plugin_name, 'exc': AnsibleError(e), 'tb': tb})
                 else:
-                    display.debug('%s did not meet %s requirements' % (source, plugin_name))
+                    display.v('%s did not meet %s requirements, check plugin documentation if this is unexpected' % (source, plugin_name))
             else:
                 if not parsed and failures:
                     # only if no plugin processed files should we show errors.
                     for fail in failures:
                         display.warning(u'\n* Failed to parse %s with %s plugin: %s' % (to_text(fail['src']), fail['plugin'], to_text(fail['exc'])))
-                        if hasattr(fail['exc'], 'tb'):
-                            display.vvv(to_text(fail['exc'].tb))
+                        if 'tb' in fail:
+                            display.vvv(to_text(fail['tb']))
                     if C.INVENTORY_ANY_UNPARSED_IS_FAILED:
                         raise AnsibleError(u'Completely failed to parse inventory source %s' % (source))
         if not parsed:
@@ -368,14 +375,12 @@ class InventoryManager(object):
 
             # sort hosts list if needed (should only happen when called from strategy)
             if order in ['sorted', 'reverse_sorted']:
-                from operator import attrgetter
                 hosts = sorted(self._hosts_patterns_cache[pattern_hash][:], key=attrgetter('name'), reverse=(order == 'reverse_sorted'))
             elif order == 'reverse_inventory':
-                hosts = sorted(self._hosts_patterns_cache[pattern_hash][:], reverse=True)
+                hosts = self._hosts_patterns_cache[pattern_hash][::-1]
             else:
                 hosts = self._hosts_patterns_cache[pattern_hash][:]
                 if order == 'shuffle':
-                    from random import shuffle
                     shuffle(hosts)
                 elif order not in [None, 'inventory']:
                     raise AnsibleOptionsError("Invalid 'order' specified for inventory hosts: %s" % order)

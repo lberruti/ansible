@@ -41,11 +41,12 @@ options:
     privatekey_path:
         required: true
         description:
-            - Path to the privatekey to use when signing the certificate signing request
+            - The path to the private key to use when signing the certificate signing request.
     privatekey_passphrase:
         required: false
         description:
-            - The passphrase for the privatekey.
+            - The passphrase for the private key.
+            - This is required if the private key is password protected.
     version:
         required: false
         default: 1
@@ -108,7 +109,7 @@ options:
         description:
             - SAN extension to attach to the certificate signing request
             - This can either be a 'comma separated string' or a YAML list.
-            - Values should be prefixed by their options. (i.e., C(email), C(URI), C(DNS), C(RID), C(IP), C(dirName),
+            - Values must be prefixed by their options. (i.e., C(email), C(URI), C(DNS), C(RID), C(IP), C(dirName),
               C(otherName) and the ones specific to your CA)
             - More at U(https://tools.ietf.org/html/rfc5280#section-4.2.1.6)
     subject_alt_name_critical:
@@ -373,12 +374,23 @@ class CertificateSigningRequest(crypto_utils.OpenSSLObject):
                 if entry[1] is not None:
                     # Workaround for https://github.com/pyca/pyopenssl/issues/165
                     nid = OpenSSL._util.lib.OBJ_txt2nid(to_bytes(entry[0]))
-                    OpenSSL._util.lib.X509_NAME_add_entry_by_NID(subject._name, nid, OpenSSL._util.lib.MBSTRING_UTF8, to_bytes(entry[1]), -1, -1, 0)
+                    if nid == 0:
+                        raise CertificateSigningRequestError('Unknown subject field identifier "{0}"'.format(entry[0]))
+                    res = OpenSSL._util.lib.X509_NAME_add_entry_by_NID(subject._name, nid, OpenSSL._util.lib.MBSTRING_UTF8, to_bytes(entry[1]), -1, -1, 0)
+                    if res == 0:
+                        raise CertificateSigningRequestError('Invalid value for subject field identifier "{0}": {1}'.format(entry[0], entry[1]))
 
             extensions = []
             if self.subjectAltName:
                 altnames = ', '.join(self.subjectAltName)
-                extensions.append(crypto.X509Extension(b"subjectAltName", self.subjectAltName_critical, altnames.encode('ascii')))
+                try:
+                    extensions.append(crypto.X509Extension(b"subjectAltName", self.subjectAltName_critical, altnames.encode('ascii')))
+                except OpenSSL.crypto.Error as e:
+                    raise CertificateSigningRequestError(
+                        'Error while parsing Subject Alternative Names {0} (check for missing type prefix, such as "DNS:"!): {1}'.format(
+                            ', '.join(["{0}".format(san) for san in self.subjectAltName]), str(e)
+                        )
+                    )
 
             if self.keyUsage:
                 usages = ', '.join(self.keyUsage)
@@ -402,13 +414,8 @@ class CertificateSigningRequest(crypto_utils.OpenSSLObject):
             req.sign(self.privatekey, self.digest)
             self.request = req
 
-            try:
-                csr_file = open(self.path, 'wb')
-                csr_file.write(crypto.dump_certificate_request(crypto.FILETYPE_PEM, self.request))
-                csr_file.close()
-            except (IOError, OSError) as exc:
-                raise CertificateSigningRequestError(exc)
-
+            result = crypto.dump_certificate_request(crypto.FILETYPE_PEM, self.request)
+            crypto_utils.write_file(module, result)
             self.changed = True
 
         file_args = module.load_file_common_arguments(module.params)
@@ -431,7 +438,7 @@ class CertificateSigningRequest(crypto_utils.OpenSSLObject):
 
         def _check_subjectAltName(extensions):
             altnames_ext = next((ext for ext in extensions if ext.get_short_name() == b'subjectAltName'), '')
-            altnames = [altname.strip() for altname in str(altnames_ext).split(',')]
+            altnames = [altname.strip() for altname in str(altnames_ext).split(',') if altname.strip() if altname.strip()]
             # apperently openssl returns 'IP address' not 'IP' as specifier when converting the subjectAltName to string
             # although it won't accept this specifier when generating the CSR. (https://github.com/openssl/openssl/issues/4004)
             altnames = [name if not name.startswith('IP Address:') else "IP:" + name.split(':', 1)[1] for name in altnames]
@@ -456,7 +463,18 @@ class CertificateSigningRequest(crypto_utils.OpenSSLObject):
                 return set(current) == set(expected) and usages_ext[0].get_critical() == critical
 
         def _check_keyUsage(extensions):
-            return _check_keyUsage_(extensions, b'keyUsage', self.keyUsage, self.keyUsage_critical)
+            usages_ext = [ext for ext in extensions if ext.get_short_name() == b'keyUsage']
+            if (not usages_ext and self.keyUsage) or (usages_ext and not self.keyUsage):
+                return False
+            elif not usages_ext and not self.keyUsage:
+                return True
+            else:
+                # OpenSSL._util.lib.OBJ_txt2nid() always returns 0 for all keyUsage values
+                # (since keyUsage has a fixed bitfield for these values and is not extensible).
+                # Therefore, we create an extension for the wanted values, and compare the
+                # data of the extensions (which is the serialized bitfield).
+                expected_ext = crypto.X509Extension(b"keyUsage", False, ', '.join(self.keyUsage).encode('ascii'))
+                return usages_ext[0].get_data() == expected_ext.get_data() and usages_ext[0].get_critical() == self.keyUsage_critical
 
         def _check_extenededKeyUsage(extensions):
             return _check_keyUsage_(extensions, b'extendedKeyUsage', self.extendedKeyUsage, self.extendedKeyUsage_critical)
@@ -465,7 +483,7 @@ class CertificateSigningRequest(crypto_utils.OpenSSLObject):
             return _check_keyUsage_(extensions, b'basicConstraints', self.basicConstraints, self.basicConstraints_critical)
 
         def _check_ocspMustStaple(extensions):
-            oms_ext = [ext for ext in extensions if ext.get_short_name() == MUST_STAPLE_NAME and str(ext) == MUST_STAPLE_VALUE]
+            oms_ext = [ext for ext in extensions if to_bytes(ext.get_short_name()) == MUST_STAPLE_NAME and to_bytes(ext) == MUST_STAPLE_VALUE]
             if OpenSSL.SSL.OPENSSL_VERSION_NUMBER < 0x10100000:
                 # Older versions of libssl don't know about OCSP Must Staple
                 oms_ext.extend([ext for ext in extensions if ext.get_short_name() == b'UNDEF' and ext.get_data() == b'\x30\x03\x02\x01\x05'])
@@ -552,7 +570,7 @@ def main():
     except AttributeError:
         module.fail_json(msg='You need to have PyOpenSSL>=0.15 to generate CSRs')
 
-    base_dir = os.path.dirname(module.params['path'])
+    base_dir = os.path.dirname(module.params['path']) or '.'
     if not os.path.isdir(base_dir):
         module.fail_json(name=base_dir, msg='The directory %s does not exist or the file is not a directory' % base_dir)
 

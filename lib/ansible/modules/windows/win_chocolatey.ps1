@@ -190,6 +190,7 @@ Function Install-Chocolatey {
         if ($proxy_url) {
             # the env values are used in the install.ps1 script when getting
             # external dependencies
+            $environment = [Environment]::GetEnvironmentVariables()
             $environment.chocolateyProxyLocation = $proxy_url
             $web_proxy = New-Object -TypeName System.Net.WebProxy -ArgumentList $proxy_url, $true
             $client.Proxy = $web_proxy
@@ -268,7 +269,15 @@ Function Install-Chocolatey {
     }
 
     $actual_version = Get-ChocolateyPackageVersion -choco_path $choco_app.Path -name chocolatey
-    if ([Version]$actual_version -lt [Version]"0.10.5") {
+    try {
+        # The Chocolatey version may not be in the strict form of major.minor.build and will fail to cast to
+        # System.Version. We want to warn if this is the case saying module behaviour may be incorrect.
+        $actual_version = [Version]$actual_version
+    } catch {
+        Add-Warning -obj $result -message "Failed to parse Chocolatey version '$actual_version' for checking module requirements, module may not work correctly: $($_.Exception.Message)"
+        $actual_version = $null
+    }
+    if ($null -ne $actual_version -and $actual_version -lt [Version]"0.10.5") {
         if ($check_mode) {
             $result.skipped = $true
             $result.msg = "Skipped check mode run on win_chocolatey as choco.exe is too old, a real run would have upgraded the executable. Actual: '$actual_version', Minimum Version: '0.10.5'"
@@ -292,7 +301,9 @@ Function Get-ChocolateyPackageVersion {
 
     $command = Argv-ToString -arguments @($choco_path, "list", "--local-only", "--exact", "--limit-output", $name)
     $res = Run-Command -command $command
-    if ($res.rc -ne 0) {
+
+    # Chocolatey v0.10.12 introduced enhanced exit codes, 2 means no results, e.g. no package
+    if ($res.rc -notin @(0, 2)) {
         $result.command = $command
         $result.rc = $res.rc
         $result.stdout = $res.stdout

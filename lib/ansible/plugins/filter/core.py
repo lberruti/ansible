@@ -34,7 +34,7 @@ import time
 import uuid
 import yaml
 
-from collections import MutableMapping
+from collections import Mapping, MutableMapping
 import datetime
 from functools import partial
 from random import Random, SystemRandom, shuffle, random
@@ -64,7 +64,8 @@ UUID_NAMESPACE_ANSIBLE = uuid.UUID('361E6D51-FAEC-444A-9079-341386DA8E2E')
 
 def to_yaml(a, *args, **kw):
     '''Make verbose, human readable yaml'''
-    transformed = yaml.dump(a, Dumper=AnsibleDumper, allow_unicode=True, **kw)
+    default_flow_style = kw.pop('default_flow_style', None)
+    transformed = yaml.dump(a, Dumper=AnsibleDumper, allow_unicode=True, default_flow_style=default_flow_style, **kw)
     return to_text(transformed)
 
 
@@ -438,8 +439,8 @@ def flatten(mylist, levels=None):
             if levels is None:
                 ret.extend(flatten(element))
             elif levels >= 1:
-                levels = int(levels) - 1
-                ret.extend(flatten(element, levels=levels))
+                # decrement as we go down the stack
+                ret.extend(flatten(element, levels=(int(levels) - 1)))
             else:
                 ret.append(element)
         else:
@@ -498,7 +499,7 @@ def dict_to_list_of_dict_key_value_elements(mydict):
     ''' takes a dictionary and transforms it into a list of dictionaries,
         with each having a 'key' and 'value' keys that correspond to the keys and values of the original '''
 
-    if not isinstance(mydict, MutableMapping):
+    if not isinstance(mydict, Mapping):
         raise AnsibleFilterError("dict2items requires a dictionary, got %s instead." % type(mydict))
 
     ret = []

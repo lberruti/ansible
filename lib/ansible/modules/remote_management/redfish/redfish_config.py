@@ -223,12 +223,15 @@ def main():
 
         for command in command_list:
             if command == "SetManagerAttributes":
+                module.deprecate(msg='The SetManagerAttributes command in '
+                                     'module redfish_config is deprecated. '
+                                     'Use an OEM Redfish module instead.',
+                                 version='2.8')
                 result = rf_utils.set_manager_attributes(mgr_attributes)
 
     # Return data back or fail with proper message
     if result['ret'] is True:
-        del result['ret']
-        module.exit_json(changed=True, msg='Action was successful')
+        module.exit_json(changed=result['changed'], msg=to_native(result['msg']))
     else:
         module.fail_json(msg=to_native(result['msg']))
 

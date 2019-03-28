@@ -68,6 +68,7 @@ import locale
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
 import types
@@ -138,7 +139,7 @@ try:
     try:
         hashlib.md5()
     except ValueError:
-        algorithms.pop('md5', None)
+        AVAILABLE_HASH_ALGORITHMS.pop('md5', None)
 except Exception:
     import sha
     AVAILABLE_HASH_ALGORITHMS = {'sha1': sha.sha}
@@ -1951,7 +1952,7 @@ class AnsibleModule(object):
         raise TypeError('%s cannot be converted to a bool' % type(value))
 
     def _check_type_int(self, value):
-        if isinstance(value, int):
+        if isinstance(value, integer_types):
             return value
 
         if isinstance(value, string_types):
@@ -2681,6 +2682,11 @@ class AnsibleModule(object):
 
         return self._clean
 
+    def _restore_signal_handlers(self):
+        # Reset SIGPIPE to SIG_DFL, otherwise in Python2.7 it gets ignored in subprocesses.
+        if PY2 and sys.platform != 'win32':
+            signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+
     def run_command(self, args, check_rc=False, close_fds=True, executable=None, data=None, binary_data=False, path_prefix=None, cwd=None,
                     use_unsafe_shell=False, prompt_regex=None, environ_update=None, umask=None, encoding='utf-8', errors='surrogate_or_strict'):
         '''
@@ -2816,6 +2822,7 @@ class AnsibleModule(object):
             stdin=st_in,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            preexec_fn=self._restore_signal_handlers,
         )
 
         # store the pwd
