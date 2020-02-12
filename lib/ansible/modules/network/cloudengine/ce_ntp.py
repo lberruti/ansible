@@ -29,6 +29,10 @@ description:
     - Manages core NTP configuration on HUAWEI CloudEngine switches.
 author:
     - Zhijin Zhou (@QijunPan)
+notes:
+    - This module requires the netconf system service be enabled on the remote device being managed.
+    - Recommended connection is C(netconf).
+    - This module also works with C(local) connections for legacy playbooks.
 options:
     server:
         description:
@@ -574,7 +578,8 @@ class Ntp(object):
                         cli_str = "%s %s" % (
                             "undo ntp unicast-peer ipv6", self.address)
                 if (self.vpn_name) and (self.vpn_name != '_public_'):
-                    cli_str = "%s %s" % (cli_str, self.vpn_name)
+                    cli_str = "%s %s %s" % (
+                        cli_str, "vpn-instance", self.vpn_name)
 
         self.updates_cmd.append(cli_str)
 
